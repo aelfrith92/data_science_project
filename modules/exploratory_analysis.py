@@ -1,6 +1,9 @@
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
+import pandas as pd
+from rich.console import Console
+from rich.table import Table
 from colorama import Fore, Style
 
 def analyze_data(data, response='response'):
@@ -12,13 +15,14 @@ def analyze_data(data, response='response'):
         print(Fore.YELLOW + "1. Generate Correlation Heatmap")
         print(Fore.YELLOW + "2. Generate QQ Plots (for all numerical variables)")
         print(Fore.YELLOW + "3. Generate Boxplots")
+        print(Fore.YELLOW + "4. Generate Response Rate Table")
         print(Fore.YELLOW + "0. Return to main menu" + Style.RESET_ALL)
 
         choice = input(Fore.CYAN + "Choose an option: " + Style.RESET_ALL)
 
         if choice == '1':
             generate_correlation_heatmap(data, response)
-        
+
         elif choice == '2':
             outlier_choice = input(Fore.CYAN + "Include outliers in QQ plots? (yes/no): " + Style.RESET_ALL).strip().lower()
             if outlier_choice == 'no':
@@ -29,10 +33,13 @@ def analyze_data(data, response='response'):
         elif choice == '3':
             generate_boxplots_by_response(data)
 
+        elif choice == '4':
+            generate_response_rate_table(data, response)
+
         elif choice == '0':
             print(Fore.CYAN + "Returning to main menu..." + Style.RESET_ALL)
             break
-        
+
         else:
             print(Fore.RED + "Invalid choice, please select a valid option." + Style.RESET_ALL)
 
@@ -53,7 +60,7 @@ def generate_qq_plots_matrix(data, outliers_included):
     """
     # Define the numerical variables to plot
     numerical_vars = data.select_dtypes(include=['float64', 'int64']).columns.tolist()  # Focus only on numerical variables
-    
+
     print(Fore.CYAN + "Debug: Checking available columns for QQ plots." + Style.RESET_ALL)
     available_columns = data.columns
     print(Fore.CYAN + f"Available columns: {list(available_columns)}" + Style.RESET_ALL)
@@ -67,7 +74,7 @@ def generate_qq_plots_matrix(data, outliers_included):
     rows = (num_vars + 2) // 3  # Calculate the number of rows needed for the grid
     fig, axes = plt.subplots(rows, 3, figsize=(15, 5 * rows))
     fig.suptitle('QQ Plots (Normality Check)', fontsize=16)
-    
+
     # Flatten axes array for easier iteration
     axes = axes.flatten()
 
@@ -104,11 +111,11 @@ def generate_boxplots_by_response(data, response='response'):
     numerical_vars = [
         'total_spending', 'num_orders', 'avg_order_value', 'total_quantity',
         'customer_tenure', 'order_frequency', 'product_diversity', 'return_rate',
-        'avg_quantity_per_order', 'recency', 'n_comp'
+        'avg_quantity_per_order', 'recency', 'n_comp', 'n_communications'
     ]
 
     categorical_vars = ['loyalty', 'nps']
-    
+
     while True:
         print(Fore.CYAN + "\nBoxplot Menu (Breakdown by Response):")
         for idx, var in enumerate(numerical_vars + categorical_vars, start=1):
@@ -116,12 +123,12 @@ def generate_boxplots_by_response(data, response='response'):
         print(Fore.YELLOW + "0. Return to the previous menu" + Style.RESET_ALL)
 
         choice = input(Fore.CYAN + "Choose a variable to visualize with a boxplot (0 to return): " + Style.RESET_ALL).strip()
-        
+
         if choice.isdigit() and int(choice) in range(len(numerical_vars + categorical_vars) + 1):
             if int(choice) == 0:
                 print(Fore.CYAN + "Returning to the previous menu..." + Style.RESET_ALL)
                 break
-            
+
             selected_var = (numerical_vars + categorical_vars)[int(choice) - 1]
             # Handle numerical variables with boxplots
             if selected_var in numerical_vars:
@@ -135,7 +142,7 @@ def generate_boxplots_by_response(data, response='response'):
 
                 # Generate the boxplot for numerical variables
                 generate_boxplot(data_clean, selected_var, response)
-            
+
             # Handle categorical variables with bar plots
             elif selected_var in categorical_vars:
                 generate_bar_plot(data, selected_var, response)
@@ -175,3 +182,53 @@ def exclude_outliers_iqr(df, columns):
         upper_bound = Q3 + 1.5 * IQR
         df_clean = df_clean[(df_clean[col] >= lower_bound) & (df_clean[col] <= upper_bound)]
     return df_clean
+
+def generate_response_rate_table(data, response):
+    """
+    Generate and display a table of response rates for loyalty and NPS categories using Rich.
+    """
+    print(Fore.CYAN + "\nGenerating Response Rate Table..." + Style.RESET_ALL)
+
+    # Initialize the console object
+    console = Console()
+
+    # Table for Loyalty
+    if 'loyalty' in data.columns:
+        loyalty_table = data.groupby('loyalty').agg(
+            N=('response', 'size'),
+            N_plus=('response', 'sum')
+        ).reset_index()
+        loyalty_table['Response Rate (%)'] = (loyalty_table['N_plus'] / loyalty_table['N']) * 100
+
+        # Display with Rich
+        rich_table = Table(title="Response Rate by Loyalty", show_lines=True)
+        rich_table.add_column("Loyalty", justify="center", style="cyan")
+        rich_table.add_column("N (Total)", justify="center", style="magenta")
+        rich_table.add_column("N+ (Responded)", justify="center", style="green")
+        rich_table.add_column("Response Rate (%)", justify="center", style="yellow")
+        for _, row in loyalty_table.iterrows():
+            rich_table.add_row(str(row['loyalty']), str(row['N']), str(row['N_plus']), f"{row['Response Rate (%)']:.2f}")
+        console.print(rich_table)
+
+    # Table for NPS Categories
+    if 'nps' in data.columns:
+        # Define NPS categories
+        bins = [0, 6, 8, 10]
+        labels = ['Detractor (0-6)', 'Passive (7-8)', 'Promoter (9-10)']
+        data['NPS Category'] = pd.cut(data['nps'].cat.codes, bins=bins, labels=labels, right=True)
+
+        nps_table = data.groupby('NPS Category').agg(
+            N=('response', 'size'),
+            N_plus=('response', 'sum')
+        ).reset_index()
+        nps_table['Response Rate (%)'] = (nps_table['N_plus'] / nps_table['N']) * 100
+
+        # Display with Rich
+        rich_table = Table(title="Response Rate by NPS Category", show_lines=True)
+        rich_table.add_column("NPS Category", justify="center", style="cyan")
+        rich_table.add_column("N (Total)", justify="center", style="magenta")
+        rich_table.add_column("N+ (Responded)", justify="center", style="green")
+        rich_table.add_column("Response Rate (%)", justify="center", style="yellow")
+        for _, row in nps_table.iterrows():
+            rich_table.add_row(str(row['NPS Category']), str(row['N']), str(row['N_plus']), f"{row['Response Rate (%)']:.2f}")
+        console.print(rich_table)
