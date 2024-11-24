@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import matplotlib.pyplot as plt
 from colorama import Fore, Style
 from rich.console import Console
 from rich.table import Table
@@ -15,21 +16,40 @@ def perform_customer_campaign_join(customer_features, campaign_response_data):
     # Step 1: Join customer_features with campaign_response_data on CustomerID
     join_key = 'CustomerID'
     joined_data = pd.merge(customer_features, campaign_response_data, on=join_key, how='inner')
-    
+
     # Step 2: Display the join result to the user
     format_message(f"Customer features successfully joined with campaign response data using '{join_key}' as the join key.", Fore.CYAN)
     format_message(f"\nJoin Type: Inner Join", Fore.GREEN)
-    
-    # Step 3: List the columns and their data types after the join
+
+    # Step 3: Calculate and display campaign response rate
+    total_responses = campaign_response_data['response'].sum()
+    total_records = len(campaign_response_data)
+    response_rate = (total_responses / total_records) * 100
+    non_response_rate = 100 - response_rate
+
+    print(Fore.CYAN + f"\nOverall Campaign Response Rate: {response_rate:.2f}%" + Style.RESET_ALL)
+    print(Fore.CYAN + f"Overall Non-Response Rate: {non_response_rate:.2f}%" + Style.RESET_ALL)
+
+    # Step 4: Plot a pie chart for response rates
+    plt.figure(figsize=(6, 6))
+    labels = ['Responded', 'Did Not Respond']
+    sizes = [total_responses, total_records - total_responses]
+    colors = ['#4CAF50', '#FF5252']
+    explode = (0.1, 0)  # Highlight the 'Responded' slice
+    plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors, explode=explode)
+    plt.title("Campaign Response Distribution")
+    plt.show()
+
+    # Step 5: List the columns and their data types after the join
     console.print(f"\n[cyan]Joined Dataset: [green]{joined_data.shape[0]} rows, {joined_data.shape[1]} columns.[/green]")
-    
+
     table = Table(title="Joined Dataset Columns and Data Types", show_lines=True)
     table.add_column("Column", justify="left", style="cyan", no_wrap=True)
     table.add_column("Data Type", justify="left", style="green")
-    
+
     for col, dtype in zip(joined_data.columns, joined_data.dtypes):
         table.add_row(col, str(dtype))
-    
+
     console.print(table)
 
     return joined_data
@@ -39,7 +59,7 @@ def derive_customer_features(joined_data):
     # Ensure 'TotalValue' is calculated correctly
     if 'TotalValue' not in joined_data.columns:
         joined_data['TotalValue'] = joined_data['Quantity'] * joined_data['UnitPrice']
-    
+
     # Step 1: Group by CustomerID to calculate the features
     customer_features = joined_data.groupby('CustomerID').agg({
         'InvoiceDate': ['min', 'max'],              # First and last purchase date
@@ -100,7 +120,7 @@ def derive_customer_features(joined_data):
     customer_table.add_column("Order Frequency", justify="right", style="green")
     customer_table.add_column("Product Diversity", justify="right", style="green")
     customer_table.add_column("Return Rate", justify="right", style="green")
-    
+
     # Populate the table with first 5 rows
     for _, row in customer_features.head().iterrows():
         customer_table.add_row(str(row['CustomerID']), 

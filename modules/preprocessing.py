@@ -14,7 +14,7 @@ def convert_data_types(df):
     # Convert CustomerID to string if it's numeric
     try:
         old_dtype = df['CustomerID'].dtype
-        if old_dtype == 'int64' or old_dtype == 'float64':
+        if old_dtype in ['int64', 'float64']:
             df['CustomerID'] = df['CustomerID'].astype(str)
             new_dtype = df['CustomerID'].dtype
             describe_conversion('CustomerID', old_dtype, new_dtype)
@@ -58,7 +58,7 @@ def convert_campaign_data_types(df):
     # Convert CustomerID to string if it's numeric
     try:
         old_dtype = df['CustomerID'].dtype
-        if old_dtype == 'int64' or old_dtype == 'float64':
+        if old_dtype in ['int64', 'float64']:
             df['CustomerID'] = df['CustomerID'].astype(str)
             new_dtype = df['CustomerID'].dtype
             describe_conversion('CustomerID', old_dtype, new_dtype)
@@ -66,7 +66,7 @@ def convert_campaign_data_types(df):
     except Exception as e:
         print(Fore.RED + f"Error converting 'CustomerID': {e}" + Style.RESET_ALL)
 
-    # Convert response and loyalty to boolean
+    # Convert response to boolean
     try:
         old_dtype = df['response'].dtype
         if old_dtype != 'bool':
@@ -77,10 +77,11 @@ def convert_campaign_data_types(df):
     except Exception as e:
         print(Fore.RED + f"Error converting 'response': {e}" + Style.RESET_ALL)
 
+    # Convert loyalty to categorical
     try:
         old_dtype = df['loyalty'].dtype
-        if old_dtype != 'bool':
-            df['loyalty'] = df['loyalty'].astype(bool)
+        if not pd.api.types.is_categorical_dtype(df['loyalty']):
+            df['loyalty'] = df['loyalty'].astype('category')
             new_dtype = df['loyalty'].dtype
             describe_conversion('loyalty', old_dtype, new_dtype)
             columns_converted.append('loyalty')
