@@ -8,7 +8,8 @@ from colorama import Fore, Style
 
 def analyze_data(data, response='response'):
     """
-    Provide options for different EDA visualizations, including heatmaps and QQ plot matrix.
+    Provide options for different EDA visualizations, including heatmaps, QQ plots, boxplots, response rate tables,
+    and bar charts/histograms.
     """
     while True:
         print(Fore.CYAN + "\nExploratory Data Analysis Menu:")
@@ -16,6 +17,7 @@ def analyze_data(data, response='response'):
         print(Fore.YELLOW + "2. Generate QQ Plots (for all numerical variables)")
         print(Fore.YELLOW + "3. Generate Boxplots")
         print(Fore.YELLOW + "4. Generate Response Rate Table")
+        print(Fore.YELLOW + "5. Generate Bar Charts and Histograms")
         print(Fore.YELLOW + "0. Return to main menu" + Style.RESET_ALL)
 
         choice = input(Fore.CYAN + "Choose an option: " + Style.RESET_ALL)
@@ -24,17 +26,19 @@ def analyze_data(data, response='response'):
             generate_correlation_heatmap(data, response)
 
         elif choice == '2':
+            # Prompt user about outliers for QQ plots
             outlier_choice = input(Fore.CYAN + "Include outliers in QQ plots? (yes/no): " + Style.RESET_ALL).strip().lower()
-            if outlier_choice == 'no':
-                generate_qq_plots_matrix(data, outliers_included=False)
-            else:
-                generate_qq_plots_matrix(data, outliers_included=True)
+            include_outliers = outlier_choice == 'yes'
+            generate_qq_plots_matrix(data, outliers_included=include_outliers)
 
         elif choice == '3':
             generate_boxplots_by_response(data)
 
         elif choice == '4':
             generate_response_rate_table(data, response)
+
+        elif choice == '5':
+            generate_bar_charts_and_histograms(data, response)
 
         elif choice == '0':
             print(Fore.CYAN + "Returning to main menu..." + Style.RESET_ALL)
@@ -232,3 +236,65 @@ def generate_response_rate_table(data, response):
         for _, row in nps_table.iterrows():
             rich_table.add_row(str(row['NPS Category']), str(row['N']), str(row['N_plus']), f"{row['Response Rate (%)']:.2f}")
         console.print(rich_table)
+
+def generate_bar_charts_and_histograms(data, response):
+    """
+    Generate bar charts and histograms for selected customer features, including additional derived variables.
+    """
+    print(Fore.CYAN + "\nBar Charts and Histograms Menu:")
+    print(Fore.YELLOW + "1. Total Sales by Response")
+    print(Fore.YELLOW + "2. Unique Products Purchased by Response")
+    print(Fore.YELLOW + "3. Number of Invoices by Response")
+    print(Fore.YELLOW + "4. Average Order Value by Response")
+    print(Fore.YELLOW + "5. Customer Tenure by Response")
+    print(Fore.YELLOW + "6. Order Frequency by Response")  # Updated from Return Rate
+    print(Fore.YELLOW + "0. Return to the previous menu" + Style.RESET_ALL)
+
+    while True:
+        choice = input(Fore.CYAN + "Choose an option: " + Style.RESET_ALL).strip()
+
+        if choice == '1':
+            generate_bar_chart(data, feature='total_spending', response=response)
+
+        elif choice == '2':
+            generate_bar_chart(data, feature='num_products_purchased', response=response)
+
+        elif choice == '3':
+            generate_bar_chart(data, feature='num_orders', response=response)
+
+        elif choice == '4':
+            generate_bar_chart(data, feature='avg_order_value', response=response)
+
+        elif choice == '5':
+            generate_bar_chart(data, feature='customer_tenure', response=response)
+
+        elif choice == '6':
+            generate_bar_chart(data, feature='order_frequency', response=response)
+
+        elif choice == '0':
+            print(Fore.CYAN + "Returning to the previous menu..." + Style.RESET_ALL)
+            break
+
+        else:
+            print(Fore.RED + "Invalid choice, please select a valid option." + Style.RESET_ALL)
+
+def generate_bar_chart(data, feature, response):
+    """
+    Generate a bar chart for a selected feature, grouped by the response variable.
+    """
+    print(Fore.CYAN + f"\nGenerating Bar Chart for {feature} by {response}..." + Style.RESET_ALL)
+
+    # Aggregate data by response
+    aggregated_data = data.groupby(response)[feature].agg(['mean', 'median']).reset_index()
+
+    # Plot mean and median as a bar chart
+    aggregated_data.plot(
+        kind='bar',
+        x=response,
+        y=['mean', 'median'],
+        figsize=(8, 6),
+        title=f'{feature.capitalize()} by {response}',
+    )
+    plt.ylabel(feature.capitalize())
+    plt.grid(alpha=0.3)
+    plt.show()
