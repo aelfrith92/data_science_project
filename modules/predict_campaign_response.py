@@ -39,9 +39,9 @@ def preprocess_data_for_model(data):
     inf_count = data.isin([float('inf'), float('-inf')]).sum().sum()
     data.replace([float('inf'), float('-inf')], pd.NA, inplace=True)
     log_messages.append(f"Replaced {inf_count} infinite values with NaN.")
-    
+
     pd.set_option('future.no_silent_downcasting', True)
-    
+
     # Fill NaN values explicitly
     nan_count_before = data.isna().sum().sum()
     data = data.fillna(0)
@@ -191,7 +191,7 @@ def predict_customer_response(data, response='response'):
         # Visualize variables and their data types
         print(Fore.GREEN + "\nSummary of Variables and Data Types:" + Style.RESET_ALL)
         print(data_types.to_string(index=False))
-    
+
     def filter_significant_features_with_reasons(X, y):
         """Filters features based on logistic regression p-values and logs reasons for exclusion."""
         X_with_const = sm.add_constant(X)
@@ -202,7 +202,7 @@ def predict_customer_response(data, response='response'):
             for var in X.columns if var not in significant_vars
         ]
         return X[significant_vars], excluded_vars
-    
+
     def remove_multicollinear_features_with_reasons(X):
         """Removes features with high multicollinearity (VIF > 5) and logs reasons for exclusion."""
         vif_data = pd.DataFrame({'Feature': X.columns, 'VIF': [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]})
@@ -297,11 +297,11 @@ def predict_customer_response(data, response='response'):
         Check multicollinearity using Variance Inflation Factor (VIF) and handle if necessary.
         """
         print(Fore.CYAN + "\nChecking Multicollinearity using VIF..." + Style.RESET_ALL)
-        
+
         # Preprocess the data
         processed_data = preprocess_data_for_model(data)
         X = processed_data.drop(columns=[response, 'CustomerID'])
-        
+
         # Calculate VIF for each feature
         vif = pd.DataFrame()
         vif["Feature"] = X.columns
@@ -309,21 +309,21 @@ def predict_customer_response(data, response='response'):
             variance_inflation_factor(X.values, i) if np.var(X.iloc[:, i]) != 0 else float("inf")
             for i in range(X.shape[1])
         ]
-        
+
         # Print the VIF values
         print(Fore.CYAN + "\nVariance Inflation Factor (VIF) Table:" + Style.RESET_ALL)
         print(vif.to_string(index=False))
-        
+
         # Highlight features with high VIF (typically > 5 or > 10 as thresholds)
         high_vif_features = vif[vif['VIF'] > 5]['Feature'].tolist()
         if high_vif_features:
             print(Fore.YELLOW + "\nFeatures with high VIF (indicating multicollinearity):" + Style.RESET_ALL)
             print(", ".join(high_vif_features))
-            
+
             # Provide the option to remove high VIF features
             print(Fore.CYAN + "\nWould you like to remove these features and re-run the model?" + Style.RESET_ALL)
             choice = input("Enter [yes/no]: ").strip().lower()
-            
+
             if choice == 'yes':
                 print(Fore.GREEN + "\nRemoving high VIF features and returning the filtered dataset..." + Style.RESET_ALL)
                 X = X.drop(columns=high_vif_features)
@@ -342,7 +342,7 @@ def predict_customer_response(data, response='response'):
         plt.legend(title="Threshold")
         plt.grid(alpha=0.3)
         plt.show()
-        
+
         return X  # Return the filtered dataset if features were removed
 
     def generate_roc_curve(y_true, y_prob, model_name=None):
