@@ -55,7 +55,7 @@ def perform_customer_campaign_join(customer_features, campaign_response_data):
     return joined_data
 
 def derive_customer_features(joined_data):
-    """Derive customer-level features and return them in a separate dataset."""
+    """Derive customer-level features and return them in a dataset containing both original and binned variables."""
     # Ensure 'TotalValue' is calculated correctly
     if 'TotalValue' not in joined_data.columns:
         joined_data['TotalValue'] = joined_data['Quantity'] * joined_data['UnitPrice']
@@ -75,7 +75,7 @@ def derive_customer_features(joined_data):
                                  'num_orders', 'total_quantity', 'total_spending', 
                                  'num_products_purchased', 'avg_price_per_unit']
 
-    # Step 2: Calculate additional features
+    # Step 2: Calculate additional continuous features
     customer_features['avg_order_value'] = customer_features['total_spending'] / customer_features['num_orders']
     customer_features['avg_quantity_per_order'] = customer_features['total_quantity'] / customer_features['num_orders']
     customer_features['customer_tenure'] = (customer_features['last_purchase'] - customer_features['first_purchase']).dt.days
@@ -83,30 +83,37 @@ def derive_customer_features(joined_data):
     customer_features['order_frequency'] = customer_features['customer_tenure'] / customer_features['num_orders']
     customer_features['product_diversity'] = customer_features['num_products_purchased']
 
-    # Step 3: Debugging Step to Verify Negative Quantities
-    # Check if any rows have negative quantities
-    negative_quantities = joined_data[joined_data['Quantity'] < 0]
-    # print(f"Debug: Found {len(negative_quantities)} records with negative quantities.")
-    if len(negative_quantities) > 0:
-        print(negative_quantities.head())  # Show the first few rows with negative quantities
-
-    # Step 4: Calculate return_rate as the ratio of negative quantities to total quantities
-    # We map the negative quantities to the respective CustomerID
+    # Step 3: Calculate return_rate as the ratio of negative quantities to total quantities
     customer_returns = joined_data[joined_data['Quantity'] < 0].groupby('CustomerID')['Quantity'].sum().abs()
-
-    # Debugging Step: Check if customer_returns is correctly calculated
-    # print(f"Debug: Customer returns (negative quantities) - First few rows:\n{customer_returns.head()}")
-
-    # Calculate return_rate as the ratio of returns to total_quantity
     customer_features['return_rate'] = customer_features['CustomerID'].map(customer_returns) / customer_features['total_quantity']
+    customer_features['return_rate'] = customer_features['return_rate'].fillna(0)  # Handle missing values
 
-    # Handle missing values (if a customer has no returns, the return_rate will be set to 0)
-    customer_features['return_rate'] = customer_features['return_rate'].fillna(0)
+    # Step 4: Create Binned Categorical Variables (preserving the originals)
+    def create_bins(column, column_name):
+        no_outliers = column[column < column.quantile(0.95)]  # Exclude outliers
+        if len(no_outliers) < 2:  # Ensure sufficient data for binning
+            console.print(f"[red]Insufficient data for binning {column_name}. Skipping binning.[/red]")
+            return pd.NA
+        bins = pd.qcut(no_outliers, q=4, duplicates='drop', retbins=True)[1]
+        return pd.cut(column, bins=bins, include_lowest=True)
 
-    # Step 5: Debugging Step - Verify return_rate after calculation
-    # print(f"Debug: Return rates - First few rows:\n{customer_features[['CustomerID', 'return_rate']].head()}")
+    customer_features['recency_bin'] = create_bins(customer_features['recency'], 'recency')
+    customer_features['total_quantity_bin'] = create_bins(customer_features['total_quantity'], 'total_quantity')
+    customer_features['avg_order_value_bin'] = create_bins(customer_features['avg_order_value'], 'avg_order_value')
+    customer_features['customer_tenure_bin'] = create_bins(customer_features['customer_tenure'], 'customer_tenure')
+    customer_features['order_frequency_bin'] = create_bins(customer_features['order_frequency'], 'order_frequency')
 
-    # Step 6: Show a sample of the new dataset with customer-level features
+    # Step 5: Ensure the final dataset contains both original and binned variables
+    customer_features = customer_features[[
+        'CustomerID', 'first_purchase', 'last_purchase', 'total_spending', 'num_orders',
+        'total_quantity', 'avg_order_value', 'recency', 'customer_tenure',
+        'avg_quantity_per_order', 'order_frequency', 'product_diversity', 'return_rate',
+        # Include binned variables
+        'recency_bin', 'total_quantity_bin', 'avg_order_value_bin',
+        'customer_tenure_bin', 'order_frequency_bin'
+    ]]
+
+    # Step 6: Display all original and binned variables in the dataset
     customer_table = Table(title="Customer-Level Features Overview", show_lines=True)
     customer_table.add_column("CustomerID", justify="center", style="cyan", no_wrap=True)
     customer_table.add_column("First Purchase", justify="right", style="green")
@@ -115,26 +122,34 @@ def derive_customer_features(joined_data):
     customer_table.add_column("Number of Orders", justify="right", style="green")
     customer_table.add_column("Average Order Value", justify="right", style="green")
     customer_table.add_column("Recency", justify="right", style="green")
+    customer_table.add_column("Recency Bin", justify="right", style="magenta")
     customer_table.add_column("Customer Tenure", justify="right", style="green")
-    customer_table.add_column("Average Quantity per Order", justify="right", style="green")
+    customer_table.add_column("Customer Tenure Bin", justify="right", style="magenta")
+    customer_table.add_column("Total Quantity", justify="right", style="green")
+    customer_table.add_column("Total Quantity Bin", justify="right", style="magenta")
     customer_table.add_column("Order Frequency", justify="right", style="green")
-    customer_table.add_column("Product Diversity", justify="right", style="green")
+    customer_table.add_column("Order Frequency Bin", justify="right", style="magenta")
     customer_table.add_column("Return Rate", justify="right", style="green")
 
     # Populate the table with first 5 rows
     for _, row in customer_features.head().iterrows():
-        customer_table.add_row(str(row['CustomerID']), 
-                               str(row['first_purchase'].date()),
-                               str(row['last_purchase'].date()),
-                               f"{row['total_spending']:.2f}", 
-                               str(row['num_orders']), 
-                               f"{row['avg_order_value']:.2f}", 
-                               str(row['recency']),
-                               str(row['customer_tenure']),
-                               f"{row['avg_quantity_per_order']:.2f}",
-                               f"{row['order_frequency']:.2f}",
-                               str(row['product_diversity']),
-                               f"{row['return_rate']:.2f}")
+        customer_table.add_row(
+            str(row['CustomerID']),
+            str(row['first_purchase'].date()),
+            str(row['last_purchase'].date()),
+            f"{row['total_spending']:.2f}",
+            str(row['num_orders']),
+            f"{row['avg_order_value']:.2f}",
+            str(row['recency']),
+            str(row['recency_bin']) if not pd.isna(row['recency_bin']) else "N/A",
+            str(row['customer_tenure']),
+            str(row['customer_tenure_bin']) if not pd.isna(row['customer_tenure_bin']) else "N/A",
+            str(row['total_quantity']),
+            str(row['total_quantity_bin']) if not pd.isna(row['total_quantity_bin']) else "N/A",
+            f"{row['order_frequency']:.2f}",
+            str(row['order_frequency_bin']) if not pd.isna(row['order_frequency_bin']) else "N/A",
+            f"{row['return_rate']:.2f}"
+        )
     console.print(customer_table)
 
     return customer_features

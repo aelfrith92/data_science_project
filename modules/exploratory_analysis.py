@@ -58,48 +58,130 @@ def analyze_data(data, response='response'):
 def generate_correlation_heatmap(data, response):
     """Generate a heatmap for all numerical variables and the boolean response."""
     print(Fore.CYAN + "\nGenerating Correlation Heatmap with Response..." + Style.RESET_ALL)
-    plt.figure(figsize=(10, 6))
-    sns.heatmap(data.corr(), annot=True, cmap='coolwarm')
+
+    # Step 1: Encode categorical variables and intervals
+    encoded_data = data.copy()
+
+    # Convert categorical variables like 'loyalty', 'nps', and binned variables into numeric representations
+    for col in encoded_data.select_dtypes(include=['category', 'object']).columns:
+        encoded_data[col] = encoded_data[col].astype('category').cat.codes
+
+    # Convert interval variables (binned variables) into numeric using the midpoints
+    for col in encoded_data.select_dtypes(include=['interval']).columns:
+        encoded_data[col] = encoded_data[col].apply(lambda x: x.mid if pd.notnull(x) else None)
+
+    # Step 2: Generate the correlation matrix
+    correlation_matrix = encoded_data.corr()
+
+    # Step 3: Plot the heatmap
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
     plt.title(f'Correlation Heatmap (Including {response})')
     plt.show()
 
+# def generate_qq_plots_matrix(data, outliers_included):
+#     """
+#     Generate a matrix of QQ plots for all numerical variables to assess normality, 
+#     without axis labels (only showing the variable names).
+#     :param data: DataFrame containing the data for analysis
+#     :param outliers_included: Boolean indicating whether outliers should be kept or removed
+#     """
+#     # Define the numerical variables to plot
+#     numerical_vars = data.select_dtypes(include=['float64', 'int64']).columns.tolist()  # Focus only on numerical variables
+
+#     print(Fore.CYAN + "Debug: Checking available columns for QQ plots." + Style.RESET_ALL)
+#     available_columns = data.columns
+#     print(Fore.CYAN + f"Available columns: {list(available_columns)}" + Style.RESET_ALL)
+
+#     # Remove outliers if requested by the user
+#     if not outliers_included:
+#         data = exclude_outliers_iqr(data, numerical_vars)
+
+#     # Set up the grid for QQ plots (3 columns for better visualization)
+#     num_vars = len(numerical_vars)
+#     rows = (num_vars + 2) // 3  # Calculate the number of rows needed for the grid
+#     fig, axes = plt.subplots(rows, 3, figsize=(15, 5 * rows))
+#     fig.suptitle('QQ Plots (Normality Check)', fontsize=16)
+
+#     # Flatten axes array for easier iteration
+#     axes = axes.flatten()
+
+#     # Generate QQ plots for each numerical variable
+#     for i, var in enumerate(numerical_vars):
+#         if var in available_columns:
+#             stats.probplot(data[var].dropna(), dist="norm", plot=axes[i])
+#             axes[i].set_title(f'QQ Plot for {var}', fontsize=12)
+#             axes[i].set_xlabel('')  # Remove x-axis label
+#             axes[i].set_ylabel('')  # Remove y-axis label
+#         else:
+#             print(Fore.RED + f"Warning: Column '{var}' not found in the dataset." + Style.RESET_ALL)
+#             axes[i].set_visible(False)  # Hide any unused subplots
+
+#     # Adjust layout for better visualization
+#     plt.tight_layout(rect=[0, 0, 1, 0.95])
+#     plt.show()
+
 def generate_qq_plots_matrix(data, outliers_included):
     """
-    Generate a matrix of QQ plots for all numerical variables to assess normality, 
-    without axis labels (only showing the variable names).
-    :param data: DataFrame containing the data for analysis
-    :param outliers_included: Boolean indicating whether outliers should be kept or removed
+    Generate a matrix of QQ plots for all informative variables (including categorical ones converted to numerical),
+    excluding non-informative variables such as CustomerID.
     """
-    # Define the numerical variables to plot
-    numerical_vars = data.select_dtypes(include=['float64', 'int64']).columns.tolist()  # Focus only on numerical variables
+    # Debug: Log initial columns and their types
+    print(Fore.CYAN + "Debug: Initial columns and types before conversion:" + Style.RESET_ALL)
+    print(data.dtypes)
 
-    print(Fore.CYAN + "Debug: Checking available columns for QQ plots." + Style.RESET_ALL)
-    available_columns = data.columns
-    print(Fore.CYAN + f"Available columns: {list(available_columns)}" + Style.RESET_ALL)
+    # Convert categorical and binned variables to numerical form temporarily for EDA
+    converted_data = data.copy()  # Keep the original data untouched
+    for col in converted_data.columns:
+        if str(converted_data[col].dtype) in ['category', 'object']:
+            try:
+                converted_data[col] = converted_data[col].astype('category').cat.codes
+                print(Fore.GREEN + f"Converted categorical column '{col}' to numerical codes for EDA." + Style.RESET_ALL)
+            except Exception as e:
+                print(Fore.RED + f"Error converting column {col}: {e}" + Style.RESET_ALL)
+
+    # Include interval dtype variables (e.g., bins) by converting intervals to midpoints
+    for col in converted_data.columns:
+        if pd.api.types.is_interval_dtype(converted_data[col]):
+            converted_data[col] = converted_data[col].apply(lambda x: x.mid if x is not pd.NA else None)
+            print(Fore.GREEN + f"Converted interval column '{col}' to midpoints for EDA." + Style.RESET_ALL)
+
+    # Exclude non-informative variables like CustomerID and boolean variables like response
+    non_informative_vars = ['CustomerID', 'response']
+    numerical_vars = converted_data.select_dtypes(include=['number']).columns.tolist()  # Select all numeric types
+    numerical_vars = [var for var in numerical_vars if var not in non_informative_vars]
+
+    # Debug: Log variables included in QQ plots
+    print(Fore.CYAN + f"Debug: Numerical variables selected for QQ plots: {numerical_vars}" + Style.RESET_ALL)
 
     # Remove outliers if requested by the user
     if not outliers_included:
-        data = exclude_outliers_iqr(data, numerical_vars)
+        converted_data = exclude_outliers_iqr(converted_data, numerical_vars)
 
-    # Set up the grid for QQ plots (3 columns for better visualization)
+    # Set up the grid for QQ plots (4 columns for compact visualization)
     num_vars = len(numerical_vars)
-    rows = (num_vars + 2) // 3  # Calculate the number of rows needed for the grid
-    fig, axes = plt.subplots(rows, 3, figsize=(15, 5 * rows))
+    cols = 4  # Number of columns
+    rows = (num_vars + cols - 1) // cols  # Calculate the number of rows needed for the grid
+    fig, axes = plt.subplots(rows, cols, figsize=(12, rows * 3))
     fig.suptitle('QQ Plots (Normality Check)', fontsize=16)
 
     # Flatten axes array for easier iteration
     axes = axes.flatten()
 
-    # Generate QQ plots for each numerical variable
+    # Generate QQ plots for each variable
     for i, var in enumerate(numerical_vars):
-        if var in available_columns:
-            stats.probplot(data[var].dropna(), dist="norm", plot=axes[i])
-            axes[i].set_title(f'QQ Plot for {var}', fontsize=12)
+        if var in converted_data.columns:
+            stats.probplot(converted_data[var].dropna(), dist="norm", plot=axes[i])
+            axes[i].set_title(f'QQ Plot for {var}', fontsize=10)
             axes[i].set_xlabel('')  # Remove x-axis label
             axes[i].set_ylabel('')  # Remove y-axis label
         else:
             print(Fore.RED + f"Warning: Column '{var}' not found in the dataset." + Style.RESET_ALL)
             axes[i].set_visible(False)  # Hide any unused subplots
+
+    # Hide any remaining unused subplots
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
 
     # Adjust layout for better visualization
     plt.tight_layout(rect=[0, 0, 1, 0.95])
@@ -117,59 +199,108 @@ def generate_bar_plot(data, variable, response):
 
 def generate_boxplots_by_response(data, response='response'):
     """
-    Allows the user to select which variable they want to generate a boxplot for, with the option
-    to include or exclude outliers, with a breakdown by the response variable.
+    Allows the user to select which variable they want to generate a boxplot for,
+    with the option to include or exclude outliers. Includes `nps` and handles
+    `loyalty` separately with a bar plot showing counts grouped by response.
     """
+    # Numerical variables for boxplots
     numerical_vars = [
         'total_spending', 'num_orders', 'avg_order_value', 'total_quantity',
         'customer_tenure', 'order_frequency', 'product_diversity', 'return_rate',
         'avg_quantity_per_order', 'recency', 'n_comp', 'n_communications'
     ]
-
-    categorical_vars = ['loyalty', 'nps']
+    # Include loyalty and nps as additional variables
+    additional_vars = ['loyalty', 'nps']
+    variables = numerical_vars + additional_vars
 
     while True:
-        print(Fore.CYAN + "\nBoxplot Menu (Breakdown by Response):")
-        for idx, var in enumerate(numerical_vars + categorical_vars, start=1):
-            print(Fore.YELLOW + f"{idx}. Plot for {var}")
+        # Display menu options
+        print(Fore.CYAN + "\nVisualization Menu (Breakdown by Response):")
+        for idx, var in enumerate(variables, start=1):
+            print(Fore.YELLOW + f"{idx}. Visualize {var}")
         print(Fore.YELLOW + "0. Return to the previous menu" + Style.RESET_ALL)
 
-        choice = input(Fore.CYAN + "Choose a variable to visualize with a boxplot (0 to return): " + Style.RESET_ALL).strip()
+        # Get user input
+        choice = input(Fore.CYAN + "Choose a variable to visualize (0 to return): " + Style.RESET_ALL).strip()
 
-        if choice.isdigit() and int(choice) in range(len(numerical_vars + categorical_vars) + 1):
+        # Validate user choice
+        if choice.isdigit() and int(choice) in range(len(variables) + 1):
+            # Exit if 0 is chosen
             if int(choice) == 0:
                 print(Fore.CYAN + "Returning to the previous menu..." + Style.RESET_ALL)
                 break
 
-            selected_var = (numerical_vars + categorical_vars)[int(choice) - 1]
-            # Handle numerical variables with boxplots
-            if selected_var in numerical_vars:
-                outlier_choice = input(Fore.CYAN + f"Include outliers in the boxplot for {selected_var}? (yes/no): " + Style.RESET_ALL).strip().lower()
+            # Get selected variable
+            selected_var = variables[int(choice) - 1]
 
-                # Remove outliers if the user chooses not to include them
-                if outlier_choice == 'no':
-                    data_clean = exclude_outliers_iqr(data, [selected_var])
-                else:
-                    data_clean = data
+            # Special case for loyalty: Generate a bar plot
+            if selected_var == 'loyalty':
+                generate_loyalty_bar_plot(data, response)
+                continue
 
-                # Generate the boxplot for numerical variables
-                generate_boxplot(data_clean, selected_var, response)
+            # Check for numeric data type, convert if necessary
+            if not pd.api.types.is_numeric_dtype(data[selected_var]):
+                print(Fore.YELLOW + f"Converting '{selected_var}' to numeric for outlier removal." + Style.RESET_ALL)
+                data[selected_var] = pd.to_numeric(data[selected_var], errors='coerce')
 
-            # Handle categorical variables with bar plots
-            elif selected_var in categorical_vars:
-                generate_bar_plot(data, selected_var, response)
+            # Check if column is empty after filtering
+            if data[selected_var].dropna().empty:
+                print(Fore.RED + f"'{selected_var}' has no valid data after filtering. Skipping visualization." + Style.RESET_ALL)
+                continue
 
+            # Check for outlier handling for numerical variables
+            outlier_choice = input(Fore.CYAN + f"Include outliers in the visualization for {selected_var}? (yes/no): " + Style.RESET_ALL).strip().lower()
+            if outlier_choice == 'no':
+                data_clean = exclude_outliers_iqr(data, [selected_var])
+            else:
+                data_clean = data
+
+            # Generate the boxplot for numerical or NPS variables
+            generate_boxplot(data_clean, selected_var, response)
         else:
             print(Fore.RED + "Invalid choice, please select a valid option." + Style.RESET_ALL)
 
+def generate_loyalty_bar_plot(data, response='response'):
+    """
+    Generates a bar plot showing counts of customers responding or not responding to the email campaign,
+    broken down by loyalty status (loyal vs. not loyal).
+    """
+    print(Fore.CYAN + "\nGenerating Loyalty Bar Plot, grouped by Response..." + Style.RESET_ALL)
+
+    # Check if loyalty and response columns exist in the data
+    if 'loyalty' not in data.columns or response not in data.columns:
+        print(Fore.RED + "Error: Required columns ('loyalty' or 'response') are missing from the dataset." + Style.RESET_ALL)
+        return
+
+    # Aggregate counts for visualization
+    loyalty_counts = data.groupby(['loyalty', response]).size().reset_index(name='counts')
+
+    # Plot the bar chart
+    plt.figure(figsize=(8, 6))
+    sns.barplot(
+        x='loyalty',
+        y='counts',
+        hue=response,
+        data=loyalty_counts,
+        palette='Set2'
+    )
+    plt.title('Counts of Responding vs. Not Responding Customers by Loyalty Status')
+    plt.xlabel('Loyalty Status (0 = Not Loyal, 1 = Loyal)')
+    plt.ylabel('Count')
+    plt.legend(title='Response', labels=['Not Responded', 'Responded'])
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
 def generate_boxplot(data, variable, response):
     """
-    Generates a boxplot for a selected variable with a breakdown by the response variable.
+    Generates a boxplot for the selected variable with a breakdown by the response variable.
     """
     print(Fore.CYAN + f"\nGenerating Boxplot for {variable}, grouped by {response}..." + Style.RESET_ALL)
     plt.figure(figsize=(8, 6))
     sns.boxplot(x=response, y=variable, data=data)
     plt.title(f'{variable} by {response}')
+    plt.grid(alpha=0.3)
     plt.show()
 
 def generate_stacked_histograms(data, variables, response):
@@ -181,18 +312,43 @@ def generate_stacked_histograms(data, variables, response):
         plt.show()
 
 def exclude_outliers_iqr(df, columns):
-    """Temporarily exclude outliers based on IQR for the selected columns."""
+    """
+    Exclude outliers based on the IQR method for the selected columns.
+    """
     df_clean = df.copy()
     for col in columns:
         if col not in df_clean.columns:
             print(Fore.RED + f"Column '{col}' does not exist in the dataset. Skipping outlier removal for this column." + Style.RESET_ALL)
             continue
+
+        # Debug: Log the column type and a few sample values
+        print(Fore.CYAN + f"Processing column: {col}")
+        print(Fore.YELLOW + f"Column data type: {df_clean[col].dtype}")
+        print(Fore.YELLOW + f"Sample values: {df_clean[col].dropna().head()}" + Style.RESET_ALL)
+
+        # Check if column has numeric data
+        if not pd.api.types.is_numeric_dtype(df_clean[col]):
+            print(Fore.RED + f"Column '{col}' is not numeric. Skipping outlier removal." + Style.RESET_ALL)
+            continue
+
+        # Check for non-NaN values before quantile calculation
+        if df_clean[col].dropna().empty:
+            print(Fore.RED + f"Column '{col}' has no non-NaN values. Skipping outlier removal." + Style.RESET_ALL)
+            continue
+
+        # Calculate IQR and bounds
         Q1 = df_clean[col].quantile(0.25)
         Q3 = df_clean[col].quantile(0.75)
         IQR = Q3 - Q1
         lower_bound = Q1 - 1.5 * IQR
         upper_bound = Q3 + 1.5 * IQR
+
+        # Debug: Log IQR calculation
+        print(Fore.CYAN + f"Q1: {Q1}, Q3: {Q3}, IQR: {IQR}, Lower Bound: {lower_bound}, Upper Bound: {upper_bound}" + Style.RESET_ALL)
+
+        # Filter data within bounds
         df_clean = df_clean[(df_clean[col] >= lower_bound) & (df_clean[col] <= upper_bound)]
+
     return df_clean
 
 def generate_response_rate_table(data, response):
@@ -363,7 +519,7 @@ def analyze_monthly_sales_from_original():
     monthly_sales['Month'] = monthly_sales['Month'].dt.to_timestamp()  # Convert to timestamp for plotting
 
     # Step 6: Filter data to exclude incomplete months
-    cutoff_date = "2023-11-30"  # Set the cutoff date to avoid representing interrupted data collection
+    cutoff_date = "2023-12-31"  # Set the cutoff date to avoid representing interrupted data collection
     monthly_sales = monthly_sales[monthly_sales['Month'] < pd.Timestamp(cutoff_date)]
 
     # Debugging output: Display aggregated sales
