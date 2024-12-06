@@ -56,11 +56,15 @@ def analyze_data(data, response='response'):
             print(Fore.RED + "Invalid choice, please select a valid option." + Style.RESET_ALL)
 
 def generate_correlation_heatmap(data, response):
-    """Generate a heatmap for all numerical variables and the boolean response."""
+    """Generate a heatmap for all numerical variables and the boolean response, excluding non-informative variables."""
     print(Fore.CYAN + "\nGenerating Correlation Heatmap with Response..." + Style.RESET_ALL)
 
-    # Step 1: Encode categorical variables and intervals
-    encoded_data = data.copy()
+    # Step 1: Exclude non-informative variables
+    non_informative_vars = ['CustomerID', 'first_purchase', 'last_purchase']
+    informative_data = data.drop(columns=[col for col in non_informative_vars if col in data.columns])
+
+    # Step 2: Encode categorical variables and intervals
+    encoded_data = informative_data.copy()
 
     # Convert categorical variables like 'loyalty', 'nps', and binned variables into numeric representations
     for col in encoded_data.select_dtypes(include=['category', 'object']).columns:
@@ -70,56 +74,14 @@ def generate_correlation_heatmap(data, response):
     for col in encoded_data.select_dtypes(include=['interval']).columns:
         encoded_data[col] = encoded_data[col].apply(lambda x: x.mid if pd.notnull(x) else None)
 
-    # Step 2: Generate the correlation matrix
+    # Step 3: Generate the correlation matrix
     correlation_matrix = encoded_data.corr()
 
-    # Step 3: Plot the heatmap
+    # Step 4: Plot the heatmap
     plt.figure(figsize=(12, 8))
     sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-    plt.title(f'Correlation Heatmap (Including {response})')
+    plt.title(f'Correlation Heatmap (Excluding Non-Informative Variables, Including {response})')
     plt.show()
-
-# def generate_qq_plots_matrix(data, outliers_included):
-#     """
-#     Generate a matrix of QQ plots for all numerical variables to assess normality, 
-#     without axis labels (only showing the variable names).
-#     :param data: DataFrame containing the data for analysis
-#     :param outliers_included: Boolean indicating whether outliers should be kept or removed
-#     """
-#     # Define the numerical variables to plot
-#     numerical_vars = data.select_dtypes(include=['float64', 'int64']).columns.tolist()  # Focus only on numerical variables
-
-#     print(Fore.CYAN + "Debug: Checking available columns for QQ plots." + Style.RESET_ALL)
-#     available_columns = data.columns
-#     print(Fore.CYAN + f"Available columns: {list(available_columns)}" + Style.RESET_ALL)
-
-#     # Remove outliers if requested by the user
-#     if not outliers_included:
-#         data = exclude_outliers_iqr(data, numerical_vars)
-
-#     # Set up the grid for QQ plots (3 columns for better visualization)
-#     num_vars = len(numerical_vars)
-#     rows = (num_vars + 2) // 3  # Calculate the number of rows needed for the grid
-#     fig, axes = plt.subplots(rows, 3, figsize=(15, 5 * rows))
-#     fig.suptitle('QQ Plots (Normality Check)', fontsize=16)
-
-#     # Flatten axes array for easier iteration
-#     axes = axes.flatten()
-
-#     # Generate QQ plots for each numerical variable
-#     for i, var in enumerate(numerical_vars):
-#         if var in available_columns:
-#             stats.probplot(data[var].dropna(), dist="norm", plot=axes[i])
-#             axes[i].set_title(f'QQ Plot for {var}', fontsize=12)
-#             axes[i].set_xlabel('')  # Remove x-axis label
-#             axes[i].set_ylabel('')  # Remove y-axis label
-#         else:
-#             print(Fore.RED + f"Warning: Column '{var}' not found in the dataset." + Style.RESET_ALL)
-#             axes[i].set_visible(False)  # Hide any unused subplots
-
-#     # Adjust layout for better visualization
-#     plt.tight_layout(rect=[0, 0, 1, 0.95])
-#     plt.show()
 
 def generate_qq_plots_matrix(data, outliers_included):
     """
@@ -353,7 +315,7 @@ def exclude_outliers_iqr(df, columns):
 
 def generate_response_rate_table(data, response):
     """
-    Generate and display a table of response rates for loyalty and NPS categories using Rich.
+    Generate and display a table of response rates for loyalty, NPS categories, and binned variables using Rich.
     """
     print(Fore.CYAN + "\nGenerating Response Rate Table..." + Style.RESET_ALL)
 
@@ -380,12 +342,16 @@ def generate_response_rate_table(data, response):
 
     # Table for NPS Categories
     if 'nps' in data.columns:
-        # Define NPS categories
-        bins = [0, 6, 8, 10]
-        labels = ['Detractor (0-6)', 'Passive (7-8)', 'Promoter (9-10)']
-        data['NPS Category'] = pd.cut(data['nps'].cat.codes, bins=bins, labels=labels, right=True)
+        # Ensure 'nps' is categorical
+        if not pd.api.types.is_categorical_dtype(data['nps']):
+            data['nps'] = pd.Categorical(data['nps'])
 
-        nps_table = data.groupby('NPS Category').agg(
+        # Define NPS categories
+        bins = [-0.1, 6, 8, 10]
+        labels = ['Detractor (0-6)', 'Passive (7-8)', 'Promoter (9-10)']
+        nps_temp = pd.cut(data['nps'].cat.codes, bins=bins, labels=labels, right=True)
+
+        nps_table = data.assign(NPS_Category=nps_temp).groupby('NPS_Category').agg(
             N=('response', 'size'),
             N_plus=('response', 'sum')
         ).reset_index()
@@ -398,7 +364,43 @@ def generate_response_rate_table(data, response):
         rich_table.add_column("N+ (Responded)", justify="center", style="green")
         rich_table.add_column("Response Rate (%)", justify="center", style="yellow")
         for _, row in nps_table.iterrows():
-            rich_table.add_row(str(row['NPS Category']), str(row['N']), str(row['N_plus']), f"{row['Response Rate (%)']:.2f}")
+            rich_table.add_row(str(row['NPS_Category']), str(row['N']), str(row['N_plus']), f"{row['Response Rate (%)']:.2f}")
+        console.print(rich_table)
+
+    # Table for Recency Bin
+    if 'recency_bin' in data.columns:
+        recency_table = data.groupby('recency_bin').agg(
+            N=('response', 'size'),
+            N_plus=('response', 'sum')
+        ).reset_index()
+        recency_table['Response Rate (%)'] = (recency_table['N_plus'] / recency_table['N']) * 100
+
+        # Display with Rich
+        rich_table = Table(title="Response Rate by Recency Bin", show_lines=True)
+        rich_table.add_column("Recency Bin", justify="center", style="cyan")
+        rich_table.add_column("N (Total)", justify="center", style="magenta")
+        rich_table.add_column("N+ (Responded)", justify="center", style="green")
+        rich_table.add_column("Response Rate (%)", justify="center", style="yellow")
+        for _, row in recency_table.iterrows():
+            rich_table.add_row(str(row['recency_bin']), str(row['N']), str(row['N_plus']), f"{row['Response Rate (%)']:.2f}")
+        console.print(rich_table)
+
+    # Table for Total Sales Bin
+    if 'total_sales_bin' in data.columns:
+        sales_table = data.groupby('total_sales_bin').agg(
+            N=('response', 'size'),
+            N_plus=('response', 'sum')
+        ).reset_index()
+        sales_table['Response Rate (%)'] = (sales_table['N_plus'] / sales_table['N']) * 100
+
+        # Display with Rich
+        rich_table = Table(title="Response Rate by Total Sales Bin", show_lines=True)
+        rich_table.add_column("Total Sales Bin", justify="center", style="cyan")
+        rich_table.add_column("N (Total)", justify="center", style="magenta")
+        rich_table.add_column("N+ (Responded)", justify="center", style="green")
+        rich_table.add_column("Response Rate (%)", justify="center", style="yellow")
+        for _, row in sales_table.iterrows():
+            rich_table.add_row(str(row['total_sales_bin']), str(row['N']), str(row['N_plus']), f"{row['Response Rate (%)']:.2f}")
         console.print(rich_table)
 
 def generate_bar_charts_and_histograms(data, response):
@@ -421,7 +423,7 @@ def generate_bar_charts_and_histograms(data, response):
             generate_bar_chart(data, feature='total_spending', response=response)
 
         elif choice == '2':
-            generate_bar_chart(data, feature='num_products_purchased', response=response)
+            generate_bar_chart(data, feature='product_diversity', response=response)
 
         elif choice == '3':
             generate_bar_chart(data, feature='num_orders', response=response)

@@ -60,6 +60,53 @@ def derive_customer_features(joined_data):
     if 'TotalValue' not in joined_data.columns:
         joined_data['TotalValue'] = joined_data['Quantity'] * joined_data['UnitPrice']
 
+    # Step 4: Create Binned Categorical Variables with User-Friendly Labels
+    def create_categorical_bins(column, column_name):
+        """
+        Create descriptive bins for a numeric column while excluding outliers.
+        Handles NaN, inf, and extreme outliers gracefully.
+        """
+        if column.isnull().all():
+            console.print(f"[red]Column '{column_name}' has all missing values. Assigning 'Unknown' for all rows.[/red]")
+            return pd.Series(["Unknown"] * len(column), dtype="category")
+
+        try:
+            # Define labels for quartiles
+            base_labels = ["Very Low", "Low", "High", "Very High"]
+
+            # Clean the column: replace inf and drop NaN values
+            column_clean = column.replace([float('inf'), float('-inf')], pd.NA).dropna()
+
+            if len(column_clean.unique()) < 2:  # Handle case with insufficient unique values
+                console.print(f"[yellow]Column '{column_name}' has insufficient unique values for binning. Assigning 'Unknown' for all rows.[/yellow]")
+                return pd.Series(["Unknown"] * len(column), dtype="category")
+
+            # Exclude outliers using the IQR method
+            Q1 = column_clean.quantile(0.25)
+            Q3 = column_clean.quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            column_without_outliers = column_clean[(column_clean >= lower_bound) & (column_clean <= upper_bound)]
+
+            if column_without_outliers.empty:
+                console.print(f"[yellow]Column '{column_name}' has no data left after outlier removal. Assigning 'Unknown' for all rows.[/yellow]")
+                return pd.Series(["Unknown"] * len(column), dtype="category")
+
+            # Generate bins dynamically
+            bins = pd.qcut(column_without_outliers, q=4, retbins=True, duplicates="drop")[1]
+            labels = base_labels[: len(bins) - 1]  # Adjust labels to match number of bins
+
+            # Create binned column
+            binned_column = pd.cut(column, bins=bins, labels=labels, include_lowest=True)
+
+            # Add "Unknown" for missing values
+            binned_column = binned_column.cat.add_categories("Unknown").fillna("Unknown")
+            return binned_column
+        except Exception as e:
+            console.print(f"[red]Error binning column '{column_name}': {e}. Assigning 'Unknown' for all rows.[/red]")
+            return pd.Series(["Unknown"] * len(column), dtype="category")
+
     # Step 1: Group by CustomerID to calculate the features
     customer_features = joined_data.groupby('CustomerID').agg({
         'InvoiceDate': ['min', 'max'],              # First and last purchase date
@@ -83,25 +130,58 @@ def derive_customer_features(joined_data):
     customer_features['order_frequency'] = customer_features['customer_tenure'] / customer_features['num_orders']
     customer_features['product_diversity'] = customer_features['num_products_purchased']
 
+    # Include Total Sales Binning
+    customer_features['total_sales_bin'] = create_categorical_bins(customer_features['total_spending'], 'total_spending')
+
+    # Apply the updated function to all binned variables
+    customer_features['recency_bin'] = create_categorical_bins(customer_features['recency'], 'recency')
+    customer_features['total_quantity_bin'] = create_categorical_bins(customer_features['total_quantity'], 'total_quantity')
+    customer_features['avg_order_value_bin'] = create_categorical_bins(customer_features['avg_order_value'], 'avg_order_value')
+    customer_features['customer_tenure_bin'] = create_categorical_bins(customer_features['customer_tenure'], 'customer_tenure')
+    customer_features['order_frequency_bin'] = create_categorical_bins(customer_features['order_frequency'], 'order_frequency')
+
+    # Debugging and Validation
+    for binned_column in [
+        'recency_bin', 'total_quantity_bin', 'avg_order_value_bin',
+        'customer_tenure_bin', 'order_frequency_bin', 'total_sales_bin'
+    ]:
+        print(f"Updated {binned_column} values after re-binning:")
+        print(customer_features[binned_column].value_counts(dropna=False))
+        print(f"Missing value counts for {binned_column}: {customer_features[binned_column].isna().sum()}")
+
     # Step 3: Calculate return_rate as the ratio of negative quantities to total quantities
     customer_returns = joined_data[joined_data['Quantity'] < 0].groupby('CustomerID')['Quantity'].sum().abs()
     customer_features['return_rate'] = customer_features['CustomerID'].map(customer_returns) / customer_features['total_quantity']
     customer_features['return_rate'] = customer_features['return_rate'].fillna(0)  # Handle missing values
 
-    # Step 4: Create Binned Categorical Variables (preserving the originals)
-    def create_bins(column, column_name):
-        no_outliers = column[column < column.quantile(0.95)]  # Exclude outliers
-        if len(no_outliers) < 2:  # Ensure sufficient data for binning
-            console.print(f"[red]Insufficient data for binning {column_name}. Skipping binning.[/red]")
-            return pd.NA
-        bins = pd.qcut(no_outliers, q=4, duplicates='drop', retbins=True)[1]
-        return pd.cut(column, bins=bins, include_lowest=True)
+    # # Step 4: Create Binned Categorical Variables (preserving the originals)
+    # def create_bins(column, column_name):
+    #     no_outliers = column[column < column.quantile(0.95)]  # Exclude outliers
+    #     if len(no_outliers) < 2:  # Ensure sufficient data for binning
+    #         console.print(f"[red]Insufficient data for binning {column_name}. Skipping binning.[/red]")
+    #         return pd.NA
+    #     bins = pd.qcut(no_outliers, q=4, duplicates='drop', retbins=True)[1]
+    #     return pd.cut(column, bins=bins, include_lowest=True)
 
-    customer_features['recency_bin'] = create_bins(customer_features['recency'], 'recency')
-    customer_features['total_quantity_bin'] = create_bins(customer_features['total_quantity'], 'total_quantity')
-    customer_features['avg_order_value_bin'] = create_bins(customer_features['avg_order_value'], 'avg_order_value')
-    customer_features['customer_tenure_bin'] = create_bins(customer_features['customer_tenure'], 'customer_tenure')
-    customer_features['order_frequency_bin'] = create_bins(customer_features['order_frequency'], 'order_frequency')
+    # customer_features['recency_bin'] = create_bins(customer_features['recency'], 'recency')
+    # customer_features['total_quantity_bin'] = create_bins(customer_features['total_quantity'], 'total_quantity')
+    # customer_features['avg_order_value_bin'] = create_bins(customer_features['avg_order_value'], 'avg_order_value')
+    # customer_features['customer_tenure_bin'] = create_bins(customer_features['customer_tenure'], 'customer_tenure')
+    # customer_features['order_frequency_bin'] = create_bins(customer_features['order_frequency'], 'order_frequency')
+
+    # Apply the updated function to all binned variables
+    customer_features['recency_bin'] = create_categorical_bins(customer_features['recency'], 'recency')
+    customer_features['total_quantity_bin'] = create_categorical_bins(customer_features['total_quantity'], 'total_quantity')
+    customer_features['avg_order_value_bin'] = create_categorical_bins(customer_features['avg_order_value'], 'avg_order_value')
+    customer_features['customer_tenure_bin'] = create_categorical_bins(customer_features['customer_tenure'], 'customer_tenure')
+    customer_features['order_frequency_bin'] = create_categorical_bins(customer_features['order_frequency'], 'order_frequency')
+
+    # Debugging and Validation
+    for binned_column in ['recency_bin', 'total_quantity_bin', 'avg_order_value_bin', 
+                        'customer_tenure_bin', 'order_frequency_bin']:
+        print(f"Updated {binned_column} values after re-binning:")
+        print(customer_features[binned_column].value_counts(dropna=False))
+        print(f"Missing value counts for {binned_column}: {customer_features[binned_column].isna().sum()}")
 
     # Step 5: Ensure the final dataset contains both original and binned variables
     customer_features = customer_features[[
@@ -110,11 +190,13 @@ def derive_customer_features(joined_data):
         'avg_quantity_per_order', 'order_frequency', 'product_diversity', 'return_rate',
         # Include binned variables
         'recency_bin', 'total_quantity_bin', 'avg_order_value_bin',
-        'customer_tenure_bin', 'order_frequency_bin'
+        'customer_tenure_bin', 'order_frequency_bin', 'total_sales_bin'
     ]]
 
-    # Step 6: Display all original and binned variables in the dataset
+    # Step 6: Display updated dataset with Total Sales Bin
     customer_table = Table(title="Customer-Level Features Overview", show_lines=True)
+
+    # Add columns explicitly
     customer_table.add_column("CustomerID", justify="center", style="cyan", no_wrap=True)
     customer_table.add_column("First Purchase", justify="right", style="green")
     customer_table.add_column("Last Purchase", justify="right", style="green")
@@ -130,8 +212,9 @@ def derive_customer_features(joined_data):
     customer_table.add_column("Order Frequency", justify="right", style="green")
     customer_table.add_column("Order Frequency Bin", justify="right", style="magenta")
     customer_table.add_column("Return Rate", justify="right", style="green")
+    customer_table.add_column("Total Sales Bin", justify="right", style="magenta")
 
-    # Populate the table with first 5 rows
+    # Populate the table with rows
     for _, row in customer_features.head().iterrows():
         customer_table.add_row(
             str(row['CustomerID']),
@@ -148,8 +231,11 @@ def derive_customer_features(joined_data):
             str(row['total_quantity_bin']) if not pd.isna(row['total_quantity_bin']) else "N/A",
             f"{row['order_frequency']:.2f}",
             str(row['order_frequency_bin']) if not pd.isna(row['order_frequency_bin']) else "N/A",
-            f"{row['return_rate']:.2f}"
+            f"{row['return_rate']:.2f}",
+            str(row['total_sales_bin']) if not pd.isna(row['total_sales_bin']) else "N/A"
         )
+
+    # Print the table
     console.print(customer_table)
 
     return customer_features
