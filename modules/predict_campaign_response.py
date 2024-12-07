@@ -11,6 +11,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from colorama import Fore, Style, init
 
+global_logs = {
+    "preprocessing": {},
+    "multicollinearity": {},
+    "significance": {},
+    "models": {
+        "baseline": None,
+        "recoded": None,
+        "outlier_removed": None,
+        "outlier_recoded_scaled": None
+    }
+}
 
 def preprocess_data_for_model(data):
     """
@@ -31,16 +42,13 @@ def preprocess_data_for_model(data):
     numeric_features = ['customer_tenure_days', 'recency_days']
     for feature in numeric_features:
         if feature in data.columns:
-            # Replace infinities with NaN
             inf_count = data[feature].isin([float('inf'), float('-inf')]).sum()
             if inf_count > 0:
                 data[feature].replace([float('inf'), float('-inf')], pd.NA, inplace=True)
                 log_messages.append(f"Replaced {inf_count} infinite values in '{feature}' with NaN.")
-
-            # Fill missing values
             nan_count = data[feature].isna().sum()
             if nan_count > 0:
-                median_value = data[feature].median()  # Using median to handle missing values
+                median_value = data[feature].median()
                 data[feature].fillna(median_value, inplace=True)
                 log_messages.append(f"Filled {nan_count} missing values in '{feature}' with median value {median_value}.")
 
@@ -57,71 +65,44 @@ def preprocess_data_for_model(data):
 
     for field in categorical_fields:
         if field in data.columns:
-            # Ensure the field is categorical
             if not pd.api.types.is_categorical_dtype(data[field]):
                 data[field] = pd.Categorical(data[field])
                 log_messages.append(f"Converted '{field}' to a categorical data type.")
-
-            # Validate and add missing categories
-            if field in ['loyalty', 'nps']:
-                if 0 not in data[field].cat.categories:
-                    data[field] = data[field].cat.add_categories([0])
-                    log_messages.append(f"Added missing category '0' to '{field}'.")
-
-            if field.endswith('_bin'):
-                if 'Unknown' not in data[field].cat.categories:
-                    data[field] = data[field].cat.add_categories(['Unknown'])
-                    log_messages.append(f"Added missing category 'Unknown' to '{field}'.")
-
-            # Fill missing values with default categories
+            if field in ['loyalty', 'nps'] and 0 not in data[field].cat.categories:
+                data[field] = data[field].cat.add_categories([0])
+                log_messages.append(f"Added missing category '0' to '{field}'.")
+            if field.endswith('_bin') and 'Unknown' not in data[field].cat.categories:
+                data[field] = data[field].cat.add_categories(['Unknown'])
+                log_messages.append(f"Added missing category 'Unknown' to '{field}'.")
             default_value = 0 if field in ['loyalty', 'nps'] else 'Unknown'
             if data[field].isna().any():
                 data[field] = data[field].fillna(default_value)
                 log_messages.append(f"Filled missing values in '{field}' with '{default_value}'.")
-
-    # Convert categorical fields to numeric (ordinal codes)
-    for field in categorical_fields:
-        if field in data.columns:
             if field in ['loyalty', 'nps']:
-                data[field] = data[field].astype(int)  # Convert to numeric (integer)
+                data[field] = data[field].astype(int)
                 log_messages.append(f"Converted categorical field '{field}' to integer codes.")
             else:
-                data[field] = data[field].cat.codes  # Convert binned fields to numeric codes
+                data[field] = data[field].cat.codes
                 log_messages.append(f"Converted binned categorical field '{field}' to numeric codes.")
 
-    # Replace infinities in the entire dataset
+    # Replace infinities and handle remaining NaN values
     inf_count = data.isin([float('inf'), float('-inf')]).sum().sum()
     if inf_count > 0:
         data.replace([float('inf'), float('-inf')], pd.NA, inplace=True)
         log_messages.append(f"Replaced {inf_count} infinite values in the dataset with NaN.")
-
-    # Fill NaN values explicitly for remaining columns
     nan_count_before = data.isna().sum().sum()
     data = data.fillna(0)
     nan_count_after = data.isna().sum().sum()
     log_messages.append(f"Filled {nan_count_before - nan_count_after} remaining NaN values with 0.")
 
-    # Explicitly handle object columns
-    def safe_to_numeric(series):
-        """Convert a pandas Series to numeric if possible, otherwise return as is."""
-        try:
-            return pd.to_numeric(series)
-        except ValueError:
-            return series
-
-    object_columns = data.select_dtypes(include=['object']).columns.tolist()
-    if object_columns:
-        data = data.apply(
-            lambda col: safe_to_numeric(col) if col.dtypes == 'object' else col
-        )
-        log_messages.append(f"Processed and converted {len(object_columns)} object columns to numeric types if possible: {object_columns}")
+    # Log preprocessing steps
+    global_logs["preprocessing"]["steps"] = log_messages
 
     # Print detailed log
     print(Fore.CYAN + "\nPreprocessing Log:" + Style.RESET_ALL)
     for message in log_messages:
         print(Fore.GREEN + "✔ " + message + Style.RESET_ALL)
 
-    # Return the preprocessed data
     return data
 
 def predict_customer_response(data, response='response'):
@@ -133,15 +114,15 @@ def predict_customer_response(data, response='response'):
 
     def submenu():
         """Submenu for configuring model parameters and running actions."""
-        significant_vars = None
-        multicollinear_vars = None
 
         while True:
             print(Fore.CYAN + "\nCustomer Response Prediction Submenu:" + Style.RESET_ALL)
             print("1. Preprocess Data")
-            print("2. Check Multicollinearity and Remove Variables")
-            print("3. Explore Feature Significance and Remove Variables")
-            print("4. Run Models (with the variables left)")
+            print("2. Run Models (Baseline)")
+            print("3. Run Models (with recoded variables and scaling)")
+            print("4. Run Models (with outlier removal)")
+            print("5. Run Models (with outlier removal, recoded variables, and scaling)")
+            print("6. Summarize Results of All Models")
             print("0. Return to Main Menu")
 
             choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
@@ -150,18 +131,22 @@ def predict_customer_response(data, response='response'):
                 processed_data = preprocess_data_for_model(data)
                 print(Fore.GREEN + "Data preprocessing completed. Ready for modeling." + Style.RESET_ALL)
             elif choice == '2':
+                # Baseline Models
                 processed_data = preprocess_data_for_model(data)
-                multicollinear_vars = check_and_handle_multicollinearity(processed_data, response)
+                filtered_data = check_and_handle_multicollinearity(processed_data, response)
+                significant_vars = explore_feature_significance(filtered_data, response)
+                if significant_vars:
+                    run_models(filtered_data, significant_vars, response)
+                else:
+                    print(Fore.RED + "No significant variables found for baseline model." + Style.RESET_ALL)
             elif choice == '3':
-                if multicollinear_vars is None:
-                    print(Fore.RED + "Please run multicollinearity checks first (Option 2)." + Style.RESET_ALL)
-                else:
-                    significant_vars = explore_feature_significance(multicollinear_vars, response)
+                run_models_with_recoded_variables(processed_data, response=response)
             elif choice == '4':
-                if significant_vars is None:
-                    print(Fore.RED + "Please process features through Options 2 and 3 first." + Style.RESET_ALL)
-                else:
-                    run_models(processed_data, significant_vars, response)
+                run_models_with_outlier_removal(processed_data, response=response)
+            elif choice == '5':
+                no_outliers_and_recoded_scaled_variables(processed_data, response=response)
+            elif choice == '6':
+                summarize_results()
             elif choice == '0':
                 print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
                 break
@@ -170,69 +155,74 @@ def predict_customer_response(data, response='response'):
 
     def check_and_handle_multicollinearity(data, response):
         """
-        Iteratively calculate VIF and remove features with the highest VIF > 5.
-        Ensure the response column is retained in the returned dataset.
+        Check multicollinearity using VIF and iteratively remove variables with VIF > 5.
+        Modular function for repeated use across models.
         """
-        print(Fore.CYAN + "\nChecking Multicollinearity using VIF..." + Style.RESET_ALL)
+        print(Fore.CYAN + "\nPerforming Multicollinearity Check..." + Style.RESET_ALL)
 
-        # Handle missing 'CustomerID'
-        if 'CustomerID' not in data.columns:
-            print(Fore.YELLOW + "'CustomerID' not found in dataset. Proceeding without it." + Style.RESET_ALL)
+        log_messages = []
+        X = data.select_dtypes(include=[np.number]).drop(columns=[response], errors='ignore')
 
-        # Drop only columns that exist
-        columns_to_drop = [col for col in [response, 'CustomerID'] if col in data.columns]
-        X = data.drop(columns=columns_to_drop)
-        y = data[response]
+        # Handle missing and non-finite values
+        if not np.isfinite(X).all().all():
+            non_finite_count = (~np.isfinite(X)).sum().sum()
+            print(Fore.YELLOW + f"Found {non_finite_count} non-finite values. Replacing with zeros." + Style.RESET_ALL)
+            X = X.fillna(0).replace([np.inf, -np.inf], 0)
 
+        vif_data = []
         iteration = 1
+
         while True:
             vif = pd.DataFrame({
                 "Feature": X.columns,
                 "VIF": [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
             })
+
+            vif_data.append(vif.copy())
             print(Fore.CYAN + f"\nVIF Calculation - Iteration {iteration}:" + Style.RESET_ALL)
             print(vif.to_string(index=False))
 
             high_vif = vif[vif["VIF"] > 5]
             if high_vif.empty:
-                print(Fore.GREEN + "\nNo multicollinearity detected. All VIF values are ≤ 5." + Style.RESET_ALL)
+                log_messages.append("No multicollinearity detected. All VIF values are ≤ 5.")
                 break
 
             to_remove = high_vif.sort_values("VIF", ascending=False).iloc[0]["Feature"]
             X = X.drop(columns=[to_remove])
-
-            print(Fore.YELLOW + f"\nRemoving feature '{to_remove}' with VIF = {high_vif.loc[high_vif['Feature'] == to_remove, 'VIF'].values[0]}." + Style.RESET_ALL)
-
+            log_messages.append(f"Removed feature '{to_remove}' with VIF = {high_vif.iloc[0]['VIF']:.2f}.")
             iteration += 1
 
-        # Reattach the response column to the filtered dataset
-        filtered_data = pd.concat([X, y], axis=1)
+        global_logs["multicollinearity"]["vif"] = vif_data[-1].to_dict("records")
+        global_logs["multicollinearity"]["steps"] = log_messages
 
-        # Final VIF visualization
-        plt.figure(figsize=(8, 6))
-        sns.barplot(x="VIF", y="Feature", data=vif, palette="coolwarm", order=vif.sort_values("VIF", ascending=False)["Feature"])
+        # Final VIF Plot
+        final_vif = vif_data[-1]
+        plt.figure(figsize=(10, 6))
+        sns.barplot(x="VIF", y="Feature", data=final_vif.sort_values("VIF", ascending=False), palette="coolwarm")
         plt.axvline(x=5, color='red', linestyle='--', label='VIF Threshold (5)')
         plt.title("Final Variance Inflation Factor (VIF) After Multicollinearity Check")
         plt.xlabel("VIF Value")
         plt.ylabel("Feature")
-        plt.legend(title="Threshold")
+        plt.legend()
         plt.grid(alpha=0.3)
         plt.show()
 
-        print(Fore.GREEN + f"\nFinal Features After Handling Multicollinearity: {list(X.columns)}" + Style.RESET_ALL)
-        return filtered_data  # Include response
+        print(Fore.CYAN + "\nMulticollinearity Log:" + Style.RESET_ALL)
+        for log in log_messages:
+            print(Fore.GREEN + "✔ " + log + Style.RESET_ALL)
+
+        # Reattach the response column
+        filtered_data = pd.concat([X, data[response]], axis=1)
+        return filtered_data
 
     def explore_feature_significance(data, response):
         """
-        Visualizes the significance of variables based on logistic regression p-values.
-        Includes log-10 scale visualization only.
+        Perform feature significance analysis using logistic regression.
+        Modular function for repeated use across models.
         """
-        processed_data = preprocess_data_for_model(data)
-
-        # Dynamically handle 'CustomerID' and 'response'
-        columns_to_drop = [col for col in [response, 'CustomerID'] if col in processed_data.columns]
-        X = processed_data.drop(columns=columns_to_drop)
-        y = processed_data[response]
+        print(Fore.CYAN + "\nExploring Feature Significance..." + Style.RESET_ALL)
+        X = data.drop(columns=[response]) if response in data.columns else data
+        y = data[response]
 
         # Add constant term for regression
         X_with_const = sm.add_constant(X)
@@ -244,37 +234,49 @@ def predict_customer_response(data, response='response'):
 
         # Log-10 scale visualization
         plt.figure(figsize=(10, 6))
-        sns.barplot(x=-np.log10(pvalues.values), y=pvalues.index, palette="coolwarm", hue=None, legend=False)
+        sns.barplot(x=-np.log10(pvalues.values), y=pvalues.index, palette="coolwarm")
         plt.axvline(x=-np.log10(0.05), color='red', linestyle='--', label='-log10(0.05)')
-        plt.title("Variable Significance (-log10(p-values))")
+        plt.title("Feature Significance (-log10(p-values))")
         plt.xlabel("-log10(p-value)")
         plt.ylabel("Variable")
-        plt.legend(title="Significance Threshold")
+        plt.legend()
         plt.grid(alpha=0.3)
         plt.show()
 
-        # Log the logistic regression summary
-        print(Fore.CYAN + "\nLogistic Regression Summary:" + Style.RESET_ALL)
-        print(logit_model.summary())
-
-        # Return significant variables
-        return [
+        # Log significant variables
+        significant_vars = [
             var for var in logit_model.pvalues.index
             if var != 'const' and logit_model.pvalues[var] < 0.05
         ]
+        global_logs["significance"]["variables"] = significant_vars
+
+        # Print logistic regression summary
+        print(Fore.CYAN + "\nLogistic Regression Summary:" + Style.RESET_ALL)
+        print(logit_model.summary())
+        return significant_vars
 
     def run_models(data, significant_vars, response):
         """
-        Execute Logistic Regression or Random Forest models with the significant variables.
+        Run Logistic Regression or Random Forest models with the given significant variables.
+        Logs the results into `global_logs`.
         """
-        print(Fore.CYAN + "\nRunning Models..." + Style.RESET_ALL)
+        print(Fore.CYAN + "\nStarting Model Run..." + Style.RESET_ALL)
 
-        # Filter the dataset to include only the significant variables and the response
+        # Filter the dataset to include only significant variables and the response
         X = data[significant_vars]
         y = data[response]
 
-        # Train-test split
-        train_size = float(input(Fore.YELLOW + "Enter train/test split ratio (e.g., 0.7 for 70% train): " + Style.RESET_ALL))
+        # Train-test split with improved validation
+        while True:
+            try:
+                train_size = float(input(Fore.YELLOW + "Enter train/test split ratio (e.g., 0.7 for 70% train): " + Style.RESET_ALL))
+                if 0.0 < train_size < 1.0:
+                    break
+                else:
+                    print(Fore.RED + "Invalid input. Please enter a value between 0.0 and 1.0." + Style.RESET_ALL)
+            except ValueError:
+                print(Fore.RED + "Invalid input. Please enter a numeric value." + Style.RESET_ALL)
+
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=(1 - train_size), random_state=42)
 
         print(Fore.CYAN + "\nSelect Model:" + Style.RESET_ALL)
@@ -282,41 +284,33 @@ def predict_customer_response(data, response='response'):
         print("2. Random Forest")
         model_choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
 
-        variables_log = {"Variables Used": list(X.columns)}
-
-        # Logistic Regression
         if model_choice == '1':
-            log_reg = LogisticRegression(max_iter=1000)
-            log_reg.fit(X_train, y_train)
-
-            # Train Data Evaluation
-            train_preds = log_reg.predict(X_train)
-            train_probs = log_reg.predict_proba(X_train)[:, 1]
-            train_metrics = evaluate_model(y_train, train_preds, train_probs, "Logistic Regression", dataset_type="Train")
-
-            # Test Data Evaluation
-            test_preds = log_reg.predict(X_test)
-            test_probs = log_reg.predict_proba(X_test)[:, 1]
-            evaluate_model(y_test, test_preds, test_probs, "Logistic Regression", train_metrics=train_metrics, dataset_type="Test")
-
-        # Random Forest
+            model = LogisticRegression(max_iter=1000)
+            model_name = "Logistic Regression"
         elif model_choice == '2':
-            rf = RandomForestClassifier(n_estimators=100, random_state=42)
-            rf.fit(X_train, y_train)
-
-            # Train Data Evaluation
-            train_preds = rf.predict(X_train)
-            train_probs = rf.predict_proba(X_train)[:, 1]
-            train_metrics = evaluate_model(y_train, train_preds, train_probs, "Random Forest", dataset_type="Train")
-
-            # Test Data Evaluation
-            test_preds = rf.predict(X_test)
-            test_probs = rf.predict_proba(X_test)[:, 1]
-            evaluate_model(y_test, test_preds, test_probs, "Random Forest", train_metrics=train_metrics, dataset_type="Test")
+            model = RandomForestClassifier(n_estimators=100, random_state=42)
+            model_name = "Random Forest"
         else:
             print(Fore.RED + "Invalid choice. Returning to submenu." + Style.RESET_ALL)
+            return
 
-        print(Fore.GREEN + f"\nVariables Used for the Model: {variables_log['Variables Used']}" + Style.RESET_ALL)
+        # Train the selected model
+        model.fit(X_train, y_train)
+
+        # Evaluate model performance on train and test datasets
+        train_metrics = evaluate_model(y_train, model.predict(X_train), model.predict_proba(X_train)[:, 1], model_name, dataset_type="Train")
+        test_metrics = evaluate_model(y_test, model.predict(X_test), model.predict_proba(X_test)[:, 1], model_name, train_metrics=train_metrics, dataset_type="Test")
+
+        # Log results in global_logs
+        model_key = f"{model_name.lower().replace(' ', '_')}_with_recoded_outliers_scaled"
+        global_logs["models"][model_key] = {
+            "train_accuracy": train_metrics["accuracy"],
+            "test_accuracy": test_metrics["accuracy"],
+            "variables_used": significant_vars,
+            "overfitting_gap": train_metrics["accuracy"] - test_metrics["accuracy"],
+            "balanced_accuracy_gap": train_metrics["balanced_accuracy"] - test_metrics["balanced_accuracy"],
+        }
+        print(Fore.GREEN + f"\n{model_name} Model Results logged: {global_logs['models'][model_key]}" + Style.RESET_ALL)
 
     def evaluate_model(y_true, y_pred, y_prob, model_name, train_metrics=None, dataset_type="Test"):
         """
@@ -381,5 +375,214 @@ def predict_customer_response(data, response='response'):
             "balanced_accuracy": balanced_accuracy,
             "best_threshold": best_threshold,
         }
+
+    def run_models_with_recoded_variables(data, response):
+        """
+        Run models with recoded variables and scaling.
+        Includes multicollinearity checks and significance reassessment.
+        """
+        print(Fore.CYAN + "\nRunning Models with Recoded Variables..." + Style.RESET_ALL)
+
+        # Preprocessing
+        data = preprocess_data_for_model(data)
+
+        # Add Recoded Variables
+        if 'num_orders' in data.columns and 'recency_days' in data.columns:
+            data['recency_ratio'] = data['recency_days'] / (data['num_orders'] + 1e-5)
+            data['complaint_ratio'] = data['n_comp'] / (data['num_orders'] + 1e-5)
+            print(Fore.GREEN + "✔ Added 'recency_ratio' and 'complaint_ratio' to the dataset." + Style.RESET_ALL)
+
+        # Scale Features
+        scaler = StandardScaler()
+        for feature in ['recency_ratio', 'complaint_ratio']:
+            if feature in data.columns:
+                data[feature] = scaler.fit_transform(data[[feature]])
+                print(Fore.GREEN + f"✔ Scaled feature '{feature}' using StandardScaler." + Style.RESET_ALL)
+
+        # Multicollinearity Check
+        data = check_and_handle_multicollinearity(data, response)
+
+        # Significance Analysis
+        significant_vars = explore_feature_significance(data, response)
+
+        if not significant_vars:
+            print(Fore.RED + "No significant variables found after multicollinearity checks." + Style.RESET_ALL)
+            return
+
+        # Run Models
+        run_models(data, significant_vars, response)
+
+    def run_models_with_outlier_removal(data, response):
+        """
+        Run models with outlier removal, multicollinearity checks, and significance reassessment.
+        """
+        print(Fore.CYAN + "\nRunning Models with Outlier Removal..." + Style.RESET_ALL)
+
+        # Preprocessing
+        data = preprocess_data_for_model(data)
+
+        # Remove Outliers
+        numerical_fields = data.select_dtypes(include=['float64', 'int64']).columns
+        for field in numerical_fields:
+            if field == response:
+                continue
+            Q1 = data[field].quantile(0.25)
+            Q3 = data[field].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            outliers = (data[field] < lower_bound) | (data[field] > upper_bound)
+            data = data[~outliers]
+            print(Fore.GREEN + f"Removed outliers from '{field}'." + Style.RESET_ALL)
+
+        # Multicollinearity Check
+        data = check_and_handle_multicollinearity(data, response)
+
+        # Significance Analysis
+        significant_vars = explore_feature_significance(data, response)
+
+        if not significant_vars:
+            print(Fore.RED + "No significant variables found after multicollinearity checks." + Style.RESET_ALL)
+            return
+
+        # Run Models
+        run_models(data, significant_vars, response)
+
+    def no_outliers_and_recoded_scaled_variables(data, response='response'):
+        """
+        Run models with outlier removal, recoded variables, and scaling.
+        Includes multicollinearity checks and significance reassessment.
+        Logs results into `global_logs`.
+        """
+        print(Fore.CYAN + "\nRunning Models with Outlier Removal, Recoded Variables, and Scaling..." + Style.RESET_ALL)
+
+        # Step 1: Preprocessing
+        processed_data = preprocess_data_for_model(data)
+
+        # Step 2: Adding Recoded Variables
+        if 'num_orders' in processed_data.columns and 'recency_days' in processed_data.columns:
+            processed_data['recency_ratio'] = processed_data['recency_days'] / (processed_data['num_orders'] + 1e-5)
+            processed_data['complaint_ratio'] = processed_data['n_comp'] / (processed_data['num_orders'] + 1e-5)
+            print(Fore.GREEN + "✔ Added 'recency_ratio' and 'complaint_ratio' to the dataset." + Style.RESET_ALL)
+
+        # Step 3: Scaling Recoded Features
+        scaler = StandardScaler()
+        for feature in ['recency_ratio', 'complaint_ratio']:
+            if feature in processed_data.columns:
+                processed_data[feature] = scaler.fit_transform(processed_data[[feature]])
+                print(Fore.GREEN + f"✔ Scaled numeric feature '{feature}' using StandardScaler." + Style.RESET_ALL)
+
+        # Step 4: Detect and Remove Outliers
+        numerical_fields = processed_data.select_dtypes(include=['float64', 'int64']).columns
+        outlier_logs = []
+
+        for field in numerical_fields:
+            if field == response:
+                continue  # Skip the response field
+            Q1 = processed_data[field].quantile(0.25)
+            Q3 = processed_data[field].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+
+            # Detect and remove outliers
+            outliers = ((processed_data[field] < lower_bound) | (processed_data[field] > upper_bound))
+            outlier_count = outliers.sum()
+            if outlier_count > 0:
+                processed_data = processed_data[~outliers]
+                outlier_logs.append(f"Removed {outlier_count} outliers from '{field}'. Remaining rows: {len(processed_data)}")
+
+        # Log outlier removal results
+        if outlier_logs:
+            print(Fore.GREEN + "\nOutlier Removal Summary:" + Style.RESET_ALL)
+            for log in outlier_logs:
+                print(Fore.GREEN + "✔ " + log + Style.RESET_ALL)
+        else:
+            print(Fore.YELLOW + "No outliers detected for numerical fields." + Style.RESET_ALL)
+
+        # Step 5: Multicollinearity Check
+        print(Fore.CYAN + "\nChecking Multicollinearity..." + Style.RESET_ALL)
+        filtered_data = check_and_handle_multicollinearity(processed_data, response)
+
+        # Step 6: Reassess Significance
+        print(Fore.CYAN + "\nPerforming Significance Testing..." + Style.RESET_ALL)
+        significant_vars = explore_feature_significance(filtered_data, response)
+
+        # Step 7: Run Models
+        if significant_vars:
+            print(Fore.CYAN + "\nRunning Models on Cleaned Dataset with Recoded Variables..." + Style.RESET_ALL)
+            run_models(filtered_data, significant_vars, response)
+        else:
+            print(Fore.RED + "No significant variables identified after outlier removal and multicollinearity checks." + Style.RESET_ALL)
+            return
+
+    def summarize_results():
+        """
+        Summarizes preprocessing, multicollinearity checks, significance analysis, and model performance.
+        Includes test accuracy comparisons and visualizations.
+        """
+        print(Fore.CYAN + "\nSummary of All Model Runs:" + Style.RESET_ALL)
+
+        # Preprocessing Overview
+        print(Fore.CYAN + "\nPreprocessing Summary:" + Style.RESET_ALL)
+        preprocessing_steps = global_logs.get("preprocessing", {}).get("steps", [])
+        if preprocessing_steps:
+            for step in preprocessing_steps:
+                print(Fore.GREEN + f"✔ {step}" + Style.RESET_ALL)
+        else:
+            print(Fore.YELLOW + "No preprocessing steps logged." + Style.RESET_ALL)
+
+        # Multicollinearity Results
+        print(Fore.CYAN + "\nMulticollinearity Checks:" + Style.RESET_ALL)
+        vif_results = global_logs.get("multicollinearity", {}).get("vif")
+        if vif_results:
+            print(Fore.GREEN + "✔ Final VIF Values:" + Style.RESET_ALL)
+            for record in vif_results:
+                print(Fore.GREEN + f"   {record['Feature']}: VIF = {record['VIF']:.2f}" + Style.RESET_ALL)
+        else:
+            print(Fore.YELLOW + "No multicollinearity results logged." + Style.RESET_ALL)
+
+        # Significance Analysis
+        print(Fore.CYAN + "\nSignificance Analysis:" + Style.RESET_ALL)
+        significant_vars = global_logs.get("significance", {}).get("variables")
+        if significant_vars:
+            print(Fore.GREEN + f"Significant Variables: {significant_vars}" + Style.RESET_ALL)
+        else:
+            print(Fore.YELLOW + "No significant variables identified." + Style.RESET_ALL)
+
+        # Model Performance Comparison
+        print(Fore.CYAN + "\nModel Performance Comparison:" + Style.RESET_ALL)
+        model_results = global_logs.get("models", {})
+        test_accuracies = []
+
+        for model_type, results in model_results.items():
+            if results:
+                print(Fore.GREEN + f"\n{model_type.capitalize()} Model Results:" + Style.RESET_ALL)
+                print(f"Train Accuracy: {results['train_accuracy']:.2f}")
+                print(f"Test Accuracy: {results['test_accuracy']:.2f}")
+                print(f"Overfitting Gap: {results['overfitting_gap']:.2f}")
+                print(f"Balanced Accuracy Gap: {results['balanced_accuracy_gap']:.2f}")
+                print(f"Variables Used: {', '.join(results['variables_used'])}")
+                test_accuracies.append((model_type.capitalize(), results["test_accuracy"]))
+            else:
+                print(Fore.YELLOW + f"No results logged for {model_type} model." + Style.RESET_ALL)
+
+        # Determine the best model
+        if test_accuracies:
+            best_model = max(test_accuracies, key=lambda x: x[1])
+            print(Fore.CYAN + f"\nBest Performing Model:" + Style.RESET_ALL)
+            print(Fore.GREEN + f"{best_model[0]} Model with Test Accuracy: {best_model[1]:.2f}" + Style.RESET_ALL)
+
+        # Visualization: Test Accuracy Comparison
+        if test_accuracies:
+            model_names, accuracies = zip(*test_accuracies)
+            plt.figure(figsize=(10, 6))
+            plt.bar(model_names, accuracies, color="skyblue", edgecolor="black")
+            plt.title("Test Accuracy Comparison Across Models")
+            plt.ylabel("Test Accuracy")
+            plt.xlabel("Model")
+            plt.ylim(0, 1)
+            plt.grid(axis="y", linestyle="--", alpha=0.7)
+            plt.show()
 
     submenu()
