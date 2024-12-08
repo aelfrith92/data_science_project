@@ -3,6 +3,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, auc
+from sklearn.tree import DecisionTreeClassifier, export_graphviz
+from sklearn.naive_bayes import GaussianNB
+from graphviz import Source
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import statsmodels.api as sm
 import numpy as np
@@ -16,10 +19,10 @@ global_logs = {
     "multicollinearity": {},
     "significance": {},
     "models": {
-        "baseline": None,
-        "recoded": None,
-        "outlier_removed": None,
-        "outlier_recoded_scaled": None
+        "baseline": {},
+        "recoded": {},
+        "outlier_removed": {},
+        "outlier_recoded_scaled": {}
     }
 }
 
@@ -123,6 +126,7 @@ def predict_customer_response(data, response='response'):
             print("4. Run Models (with outlier removal)")
             print("5. Run Models (with outlier removal, recoded variables, and scaling)")
             print("6. Summarize Results of All Models")
+            print("7. Naive Bayes and Decision Trees")
             print("0. Return to Main Menu")
 
             choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
@@ -165,6 +169,8 @@ def predict_customer_response(data, response='response'):
                 no_outliers_and_recoded_scaled_variables(processed_data, response=response)
             elif choice == '6':
                 summarize_results()
+            elif choice == '7':
+                run_model_evaluation_submenu(processed_data, response=response)
             elif choice == '0':
                 print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
                 break
@@ -607,7 +613,6 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.RED + "No performance metrics available for visualization." + Style.RESET_ALL)
 
-
     def generate_aggregated_performance_chart(metrics):
         """
         Generates an aggregated performance chart for all model configurations and metrics.
@@ -644,6 +649,325 @@ def predict_customer_response(data, response='response'):
         plt.axhline(0, color="black", linestyle="--", linewidth=1)
         plt.title("Overfitting Gap Across Configurations and Models")
         plt.ylabel("Overfitting Gap (Train - Test Accuracy)")
+        plt.xlabel("Configuration")
+        plt.legend(title="Model")
+        plt.grid(axis="y", linestyle="--", alpha=0.7)
+        plt.show()
+
+    def preprocess_for_configuration(data, config_key, response="response"):
+        """
+        Preprocess the data based on the selected configuration.
+        Returns the modified dataset.
+        """
+        processed_data = preprocess_data_for_model(data)
+
+        if config_key == "baseline":
+            # Perform multicollinearity and significance checks
+            processed_data = check_and_handle_multicollinearity(processed_data, response)
+            significant_vars = explore_feature_significance(processed_data, response)
+            if significant_vars:
+                processed_data = processed_data[significant_vars + [response]]
+            return processed_data
+
+        if config_key == "recoded":
+            # Add derived features and scale them
+            if 'num_orders' in processed_data.columns and 'recency_days' in processed_data.columns:
+                processed_data['recency_ratio'] = processed_data['recency_days'] / (processed_data['num_orders'] + 1e-5)
+                processed_data['complaint_ratio'] = processed_data['n_comp'] / (processed_data['num_orders'] + 1e-5)
+
+            numerical_fields = ['recency_ratio', 'complaint_ratio']
+            scaler = StandardScaler()
+            for field in numerical_fields:
+                if field in processed_data.columns:
+                    processed_data[field] = scaler.fit_transform(processed_data[[field]])
+
+            # Perform multicollinearity and significance checks
+            processed_data = check_and_handle_multicollinearity(processed_data, response)
+            significant_vars = explore_feature_significance(processed_data, response)
+            if significant_vars:
+                processed_data = processed_data[significant_vars + [response]]
+            return processed_data
+
+        if config_key == "outlier_removed":
+            # Remove outliers
+            numerical_fields = processed_data.select_dtypes(include=['float64', 'int64']).columns
+            for field in numerical_fields:
+                if field == response:
+                    continue
+                Q1 = processed_data[field].quantile(0.25)
+                Q3 = processed_data[field].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                processed_data = processed_data[(processed_data[field] >= lower_bound) & (processed_data[field] <= upper_bound)]
+
+            # Perform multicollinearity and significance checks
+            processed_data = check_and_handle_multicollinearity(processed_data, response)
+            significant_vars = explore_feature_significance(processed_data, response)
+            if significant_vars:
+                processed_data = processed_data[significant_vars + [response]]
+            return processed_data
+
+        if config_key == "outlier_recoded_scaled":
+            # Combine outlier removal and recoded logic
+            processed_data = preprocess_for_configuration(data, "recoded", response)
+            numerical_fields = processed_data.select_dtypes(include=['float64', 'int64']).columns
+            for field in numerical_fields:
+                if field == response:
+                    continue
+                Q1 = processed_data[field].quantile(0.25)
+                Q3 = processed_data[field].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                processed_data = processed_data[(processed_data[field] >= lower_bound) & (processed_data[field] <= upper_bound)]
+            return processed_data
+
+    def run_model_evaluation_submenu(processed_data, response="response"):
+        """
+        Submenu for evaluating Naïve Bayes and Decision Tree across configurations.
+        """
+        from sklearn.naive_bayes import GaussianNB
+        from sklearn.tree import DecisionTreeClassifier
+
+        while True:
+            print(Fore.CYAN + "\nEvaluate Naïve Bayes and Decision Tree Models:" + Style.RESET_ALL)
+            print("1. Run Naïve Bayes (Baseline)")
+            print("2. Run Naïve Bayes (Recoded)")
+            print("3. Run Naïve Bayes (Outlier Removed)")
+            print("4. Run Naïve Bayes (Outlier Recoded Scaled)")
+            print("5. Run Decision Tree (Baseline)")
+            print("6. Run Decision Tree (Recoded)")
+            print("7. Run Decision Tree (Outlier Removed)")
+            print("8. Run Decision Tree (Outlier Recoded Scaled)")
+            print("9. Compare AUC for All Models")
+            print("0. Return to Main Menu")
+
+            choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
+
+            if choice == '1':
+                evaluate_naive_bayes("baseline", processed_data, response)
+            elif choice == '2':
+                evaluate_naive_bayes("recoded", processed_data, response)
+            elif choice == '3':
+                evaluate_naive_bayes("outlier_removed", processed_data, response)
+            elif choice == '4':
+                evaluate_naive_bayes("outlier_recoded_scaled", processed_data, response)
+            elif choice == '5':
+                evaluate_decision_tree("baseline", processed_data, response)
+            elif choice == '6':
+                evaluate_decision_tree("recoded", processed_data, response)
+            elif choice == '7':
+                evaluate_decision_tree("outlier_removed", processed_data, response)
+            elif choice == '8':
+                evaluate_decision_tree("outlier_recoded_scaled", processed_data, response)
+            elif choice == '9':
+                compare_all_models_auc()
+            elif choice == '0':
+                print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
+                break
+            else:
+                print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)    
+
+    def evaluate_model_performance(y_true, y_pred, y_prob, model_name, dataset_type):
+        """
+        Evaluate model performance and return key metrics.
+        Includes confusion matrix, AUC, and ROC Curve.
+        """
+        print(Fore.CYAN + f"\nEvaluating {model_name} on {dataset_type} Data..." + Style.RESET_ALL)
+
+        # Confusion Matrix
+        cm = confusion_matrix(y_true, y_pred)
+        tn, fp, fn, tp = cm.ravel()
+
+        # Calculate Metrics
+        accuracy = accuracy_score(y_true, y_pred)
+        precision = precision_score(y_true, y_pred, zero_division=0)
+        recall = recall_score(y_true, y_pred, zero_division=0)  # Sensitivity
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0  # Specificity
+        f1 = f1_score(y_true, y_pred, zero_division=0)
+        fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+        auc_score = auc(fpr, tpr)
+
+        # Print Metrics
+        print(f"Accuracy: {accuracy:.2f}, Precision: {precision:.2f}, Recall (Sensitivity): {recall:.2f}")
+        print(f"Specificity: {specificity:.2f}, F1 Score: {f1:.2f}, AUC: {auc_score:.2f}")
+
+        # Save and Display Confusion Matrix
+        plt.figure()
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['No', 'Yes'], yticklabels=['No', 'Yes'])
+        plt.title(f"Confusion Matrix ({model_name}, {dataset_type})")
+        plt.xlabel("Predicted")
+        plt.ylabel("Actual")
+        plt.show()
+
+        # Save and Display ROC Curve
+        plt.figure()
+        plt.plot(fpr, tpr, label=f"AUC = {auc_score:.2f}")
+        plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+        plt.title(f"ROC Curve ({model_name}, {dataset_type})")
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.legend(loc="lower right")
+        plt.grid(alpha=0.3)
+        plt.show()
+
+        # Return Metrics as a Dictionary
+        return {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "specificity": specificity,
+            "f1_score": f1,
+            "auc": auc_score,
+            "confusion_matrix": cm.tolist()  # Save as a list for logging
+        }
+
+    def evaluate_naive_bayes(config_key, data, response="response"):
+        print(Fore.CYAN + f"\nRunning Naïve Bayes for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
+
+        # Preprocess data for the given configuration
+        filtered_data = preprocess_for_configuration(data, config_key, response)
+
+        # Train-test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
+        )
+
+        # Train Naïve Bayes
+        model = GaussianNB()
+        model.fit(X_train, y_train)
+
+        # Evaluate Train Data
+        y_train_pred = model.predict(X_train)
+        y_train_prob = model.predict_proba(X_train)[:, 1]
+        train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Naive Bayes", "Train")
+
+        # Evaluate Test Data
+        y_test_pred = model.predict(X_test)
+        y_test_prob = model.predict_proba(X_test)[:, 1]
+        test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Naive Bayes", "Test")
+
+        # Log Results
+        global_logs["models"][config_key]["naive_bayes_results"] = {
+            "train_metrics": train_metrics,
+            "test_metrics": test_metrics,
+        }
+
+    def evaluate_decision_tree(config_key, data, response="response"):
+        """
+        Train and evaluate Decision Tree for the given configuration.
+
+        Parameters:
+        - config_key: Configuration key (e.g., 'baseline', 'recoded')
+        - data: Input dataset
+        - response: Target variable
+        """
+        print(Fore.CYAN + f"\nRunning Decision Tree for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
+
+        # Preprocess data for the given configuration
+        filtered_data = preprocess_for_configuration(data, config_key, response)
+
+        # Train-test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
+        )
+
+        # Train Decision Tree
+        model = DecisionTreeClassifier(random_state=42)
+        model.fit(X_train, y_train)
+
+        visualize_decision_tree(
+            model=model,
+            feature_names=X_train.columns,
+            class_names=["No", "Yes"],
+            config_key=config_key,  # Pass the configuration key
+            file_name="decision_tree_visualization"
+        )
+
+        # Evaluate Train Data
+        y_train_pred = model.predict(X_train)
+        y_train_prob = model.predict_proba(X_train)[:, 1]
+        train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Decision Tree", "Train")
+
+        # Evaluate Test Data
+        y_test_pred = model.predict(X_test)
+        y_test_prob = model.predict_proba(X_test)[:, 1]
+        test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Decision Tree", "Test")
+
+        # Log Results
+        if config_key not in global_logs["models"]:
+            global_logs["models"][config_key] = {}
+        global_logs["models"][config_key]["decision_tree_results"] = {
+            "train_metrics": train_metrics,
+            "test_metrics": test_metrics,
+        }
+
+    def visualize_decision_tree(model, feature_names, class_names, config_key=None, file_name="tree_visualization"):
+        """
+        Visualizes the decision tree and saves it as an image.
+        """
+        from sklearn.tree import export_graphviz
+        from graphviz import Source
+
+        # Append `config_key` to the file name if provided
+        if config_key:
+            file_name = f"{file_name}_{config_key}"
+
+        dot_data = export_graphviz(
+            model,
+            out_file=None,
+            feature_names=feature_names,
+            class_names=class_names,
+            filled=True,
+            rounded=True,
+            special_characters=True
+        )
+        graph = Source(dot_data)
+        graph.render(file_name, format="png", cleanup=True)
+        print(f"Decision tree visualization saved as {file_name}.png")
+
+    def compare_all_models_auc():
+        """
+        Compare AUC for all models across configurations and visualize the results.
+        """
+        print(Fore.CYAN + "\nComparing AUC for All Models..." + Style.RESET_ALL)
+
+        metrics = []
+
+        # Iterate through all configurations and model results
+        for config, models in global_logs["models"].items():
+            for model_name, results in models.items():
+                try:
+                    # Extract train and test AUC if available
+                    train_auc = results.get("train_metrics", {}).get("auc", None)
+                    test_auc = results.get("test_metrics", {}).get("auc", None)
+
+                    if train_auc is not None and test_auc is not None:
+                        metrics.append({
+                            "Configuration": config.capitalize(),
+                            "Model": model_name.replace("_", " ").capitalize(),
+                            "Train AUC": train_auc,
+                            "Test AUC": test_auc,
+                        })
+                    else:
+                        print(Fore.YELLOW + f"Skipping {model_name} for {config} due to missing AUC data." + Style.RESET_ALL)
+                except Exception as e:
+                    print(Fore.RED + f"Error processing {model_name} for {config}: {e}" + Style.RESET_ALL)
+
+        # Check if any metrics were collected
+        if not metrics:
+            print(Fore.RED + "No AUC data available for comparison." + Style.RESET_ALL)
+            return
+
+        # Convert metrics to DataFrame for visualization
+        df = pd.DataFrame(metrics)
+
+        # Generate bar chart for Test AUC
+        plt.figure(figsize=(12, 6))
+        sns.barplot(data=df, x="Configuration", y="Test AUC", hue="Model", edgecolor="black")
+        plt.title("Test AUC Comparison Across Configurations and Models")
+        plt.ylabel("Test AUC")
         plt.xlabel("Configuration")
         plt.legend(title="Model")
         plt.grid(axis="y", linestyle="--", alpha=0.7)

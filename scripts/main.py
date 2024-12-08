@@ -15,17 +15,22 @@ from exploratory_analysis import analyze_data
 
 # In the main menu:
 def main():
-
     while True:
         print_menu()
-        choice = input(Fore.CYAN + "Enter your choice (0-8): " + Style.RESET_ALL)
+        choice = input(Fore.CYAN + "Enter your choice (0-8): " + Style.RESET_ALL).strip()
 
-        if choice == '1':
+        if not choice.isdigit() or int(choice) not in range(0, 9):
+            print(Fore.RED + "Invalid choice, please select a valid option (0-8)." + Style.RESET_ALL)
+            continue
+
+        choice = int(choice)
+
+        if choice == 1:
             online_retail_data, campaign_response_data = load_data()
             print_initial_dimensions(online_retail_data, "Online Retail")
             print_initial_dimensions(campaign_response_data, "Campaign Response")
 
-        elif choice == '2':
+        elif choice == 2:
             if 'online_retail_data' in locals() and 'campaign_response_data' in locals():
                 online_retail_data = convert_data_types(online_retail_data)
                 campaign_response_data = convert_campaign_data_types(campaign_response_data)
@@ -34,20 +39,20 @@ def main():
             else:
                 print(Fore.RED + "Data is not loaded. Please choose option 1 first." + Style.RESET_ALL)
 
-        elif choice == '3':
+        elif choice == 3:
             if 'online_retail_data' in locals() and 'campaign_response_data' in locals():
                 online_retail_data = process_missing_data(online_retail_data)
                 campaign_response_data = process_missing_data(campaign_response_data)
             else:
                 print(Fore.RED + "Data is not loaded. Please choose option 1 first." + Style.RESET_ALL)
 
-        elif choice == '4':
+        elif choice == 4:
             if 'online_retail_data' in locals() and 'campaign_response_data' in locals():
                 online_retail_data, campaign_response_data = perform_integrity_checks(online_retail_data, campaign_response_data)
             else:
                 print(Fore.RED + "Data is not loaded. Please choose option 1 first." + Style.RESET_ALL)
 
-        elif choice == '5':
+        elif choice == 5:
             if 'online_retail_data' in locals() and 'campaign_response_data' in locals():
                 customer_features = derive_customer_features(online_retail_data)
 
@@ -58,19 +63,19 @@ def main():
             else:
                 print(Fore.RED + "Data is not loaded. Please choose option 1 first." + Style.RESET_ALL)
 
-        elif choice == '6':  # Exploratory Data Analysis (EDA)
+        elif choice == 6:  # Exploratory Data Analysis (EDA)
             if 'joined_data' in locals():
-                analyze_data(joined_data)  # Call the updated function for EDA
+                analyze_data(joined_data, response='response')
             else:
                 print(Fore.RED + "Data is not loaded. Please choose option 5 to perform the JOIN first." + Style.RESET_ALL)
 
-        elif choice == '7':  # Predict Customer Response (ML)
+        elif choice == 7:  # Predict Customer Response (ML)
             if 'joined_data' in locals():
-                predict_customer_response(joined_data, response='response')  # Updated function
+                predict_customer_response(joined_data, response='response')
             else:
                 print(Fore.RED + "Data is not loaded. Please choose option 5 to perform the JOIN first." + Style.RESET_ALL)
 
-        elif choice == '8':  # Full Pipeline (Run All)
+        elif choice == 8:  # Full Pipeline (Run All)
             online_retail_data, campaign_response_data = load_data()
             online_retail_data = convert_data_types(online_retail_data)
             campaign_response_data = convert_campaign_data_types(campaign_response_data)
@@ -83,23 +88,16 @@ def main():
                 joined_data = perform_customer_campaign_join(customer_features, campaign_response_data)
 
                 if joined_data is not None:
-                    # Perform EDA
                     analyze_data(joined_data, response='response')
-                    
-                    # Predict customer response
-                    print(Fore.CYAN + "\nRunning Predict Customer Response as part of the Full Pipeline..." + Style.RESET_ALL)
                     predict_customer_response(joined_data, response='response')
                 else:
                     print(Fore.RED + "Error joining customer features with campaign response data." + Style.RESET_ALL)
             else:
                 print(Fore.RED + "Error deriving customer features. Please check the data integrity." + Style.RESET_ALL)
 
-        elif choice == '0':
+        elif choice == 0:
             print(Fore.CYAN + "\nExiting the program. Goodbye!" + Style.RESET_ALL)
             break
-
-        else:
-            print(Fore.RED + "Invalid choice, please select a valid option." + Style.RESET_ALL)
 
 # Initialize colorama
 init(autoreset=True)
