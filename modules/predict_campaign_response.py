@@ -131,12 +131,30 @@ def predict_customer_response(data, response='response'):
                 processed_data = preprocess_data_for_model(data)
                 print(Fore.GREEN + "Data preprocessing completed. Ready for modeling." + Style.RESET_ALL)
             elif choice == '2':
-                # Baseline Models
+                # Preprocess the data
                 processed_data = preprocess_data_for_model(data)
+
+                # Log the columns
+                print(Fore.CYAN + "\nColumns After Preprocessing:" + Style.RESET_ALL)
+                print(Fore.GREEN + ", ".join(processed_data.columns) + Style.RESET_ALL)
+
+                # Handle multicollinearity
                 filtered_data = check_and_handle_multicollinearity(processed_data, response)
+
+                # Log the columns
+                print(Fore.CYAN + "\nColumns After Multicollinearity Check:" + Style.RESET_ALL)
+                print(Fore.GREEN + ", ".join(filtered_data.columns) + Style.RESET_ALL)
+
+                # Perform significance testing
                 significant_vars = explore_feature_significance(filtered_data, response)
+
+                # Log the significant variables
+                print(Fore.CYAN + "\nSignificant Variables:" + Style.RESET_ALL)
+                print(Fore.GREEN + ", ".join(significant_vars) + Style.RESET_ALL)
+
                 if significant_vars:
-                    run_models(filtered_data, significant_vars, response)
+                    configuration_key = "baseline"
+                    run_models(filtered_data, significant_vars, response, configuration_key)
                 else:
                     print(Fore.RED + "No significant variables found for baseline model." + Style.RESET_ALL)
             elif choice == '3':
@@ -255,14 +273,17 @@ def predict_customer_response(data, response='response'):
         print(logit_model.summary())
         return significant_vars
 
-    def run_models(data, significant_vars, response):
-        """
-        Run Logistic Regression or Random Forest models with the given significant variables.
-        Logs the results into `global_logs`.
-        """
-        print(Fore.CYAN + "\nStarting Model Run..." + Style.RESET_ALL)
+    def run_models(data, significant_vars, response, configuration_key):
+        print(Fore.CYAN + "\nValidating Significant Variables Against Data Columns..." + Style.RESET_ALL)
+        missing_vars = [var for var in significant_vars if var not in data.columns]
+        if missing_vars:
+            print(Fore.RED + f"Error: The following significant variables are missing from the dataset: {missing_vars}" + Style.RESET_ALL)
+            print(Fore.CYAN + "Available Columns in Data:" + Style.RESET_ALL)
+            print(Fore.GREEN + ", ".join(data.columns) + Style.RESET_ALL)
+            return  # Exit the function to prevent further errors.
 
-        # Filter the dataset to include only significant variables and the response
+        # Proceed only with valid significant variables
+        significant_vars = [var for var in significant_vars if var in data.columns]
         X = data[significant_vars]
         y = data[response]
 
@@ -301,16 +322,20 @@ def predict_customer_response(data, response='response'):
         train_metrics = evaluate_model(y_train, model.predict(X_train), model.predict_proba(X_train)[:, 1], model_name, dataset_type="Train")
         test_metrics = evaluate_model(y_test, model.predict(X_test), model.predict_proba(X_test)[:, 1], model_name, train_metrics=train_metrics, dataset_type="Test")
 
+        # Initialize the configuration key in global_logs if not already initialized
+        if global_logs["models"][configuration_key] is None:
+            global_logs["models"][configuration_key] = {}
+
         # Log results in global_logs
-        model_key = f"{model_name.lower().replace(' ', '_')}_with_recoded_outliers_scaled"
-        global_logs["models"][model_key] = {
-            "train_accuracy": train_metrics["accuracy"],
-            "test_accuracy": test_metrics["accuracy"],
+        model_key = f"{model_name.lower().replace(' ', '_')}_results"
+        global_logs["models"][configuration_key][model_key] = {
+            "train_accuracy": train_metrics.get("accuracy"),
+            "test_accuracy": test_metrics.get("accuracy"),
             "variables_used": significant_vars,
-            "overfitting_gap": train_metrics["accuracy"] - test_metrics["accuracy"],
-            "balanced_accuracy_gap": train_metrics["balanced_accuracy"] - test_metrics["balanced_accuracy"],
+            "overfitting_gap": train_metrics.get("accuracy") - test_metrics.get("accuracy"),
+            "balanced_accuracy_gap": train_metrics.get("balanced_accuracy") - test_metrics.get("balanced_accuracy"),
         }
-        print(Fore.GREEN + f"\n{model_name} Model Results logged: {global_logs['models'][model_key]}" + Style.RESET_ALL)
+        print(Fore.GREEN + f"\n{model_name} Model Results logged: {global_logs['models'][configuration_key][model_key]}" + Style.RESET_ALL)
 
     def evaluate_model(y_true, y_pred, y_prob, model_name, train_metrics=None, dataset_type="Test"):
         """
@@ -409,8 +434,9 @@ def predict_customer_response(data, response='response'):
             print(Fore.RED + "No significant variables found after multicollinearity checks." + Style.RESET_ALL)
             return
 
+        configuration_key = "recoded"
         # Run Models
-        run_models(data, significant_vars, response)
+        run_models(data, significant_vars, response, configuration_key)
 
     def run_models_with_outlier_removal(data, response):
         """
@@ -445,8 +471,9 @@ def predict_customer_response(data, response='response'):
             print(Fore.RED + "No significant variables found after multicollinearity checks." + Style.RESET_ALL)
             return
 
+        configuration_key = "outlier_removed"
         # Run Models
-        run_models(data, significant_vars, response)
+        run_models(data, significant_vars, response, configuration_key)
 
     def no_outliers_and_recoded_scaled_variables(data, response='response'):
         """
@@ -511,7 +538,9 @@ def predict_customer_response(data, response='response'):
         # Step 7: Run Models
         if significant_vars:
             print(Fore.CYAN + "\nRunning Models on Cleaned Dataset with Recoded Variables..." + Style.RESET_ALL)
-            run_models(filtered_data, significant_vars, response)
+            configuration_key = "outlier_recoded_scaled"
+            # Run Models
+            run_models(filtered_data, significant_vars, response, configuration_key)
         else:
             print(Fore.RED + "No significant variables identified after outlier removal and multicollinearity checks." + Style.RESET_ALL)
             return
@@ -519,11 +548,11 @@ def predict_customer_response(data, response='response'):
     def summarize_results():
         """
         Summarizes preprocessing, multicollinearity checks, significance analysis, and model performance.
-        Includes test accuracy comparisons and visualizations.
+        Visualizes aggregated performance metrics for all models and configurations.
         """
         print(Fore.CYAN + "\nSummary of All Model Runs:" + Style.RESET_ALL)
 
-        # Preprocessing Overview
+        # Step 1: Preprocessing Overview
         print(Fore.CYAN + "\nPreprocessing Summary:" + Style.RESET_ALL)
         preprocessing_steps = global_logs.get("preprocessing", {}).get("steps", [])
         if preprocessing_steps:
@@ -532,7 +561,7 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.YELLOW + "No preprocessing steps logged." + Style.RESET_ALL)
 
-        # Multicollinearity Results
+        # Step 2: Multicollinearity Results
         print(Fore.CYAN + "\nMulticollinearity Checks:" + Style.RESET_ALL)
         vif_results = global_logs.get("multicollinearity", {}).get("vif")
         if vif_results:
@@ -542,47 +571,82 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.YELLOW + "No multicollinearity results logged." + Style.RESET_ALL)
 
-        # Significance Analysis
-        print(Fore.CYAN + "\nSignificance Analysis:" + Style.RESET_ALL)
-        significant_vars = global_logs.get("significance", {}).get("variables")
-        if significant_vars:
-            print(Fore.GREEN + f"Significant Variables: {significant_vars}" + Style.RESET_ALL)
-        else:
-            print(Fore.YELLOW + "No significant variables identified." + Style.RESET_ALL)
-
-        # Model Performance Comparison
+        # Step 3: Model Performance Comparison
         print(Fore.CYAN + "\nModel Performance Comparison:" + Style.RESET_ALL)
         model_results = global_logs.get("models", {})
-        test_accuracies = []
+        all_metrics = []
 
-        for model_type, results in model_results.items():
-            if results:
-                print(Fore.GREEN + f"\n{model_type.capitalize()} Model Results:" + Style.RESET_ALL)
-                print(f"Train Accuracy: {results['train_accuracy']:.2f}")
-                print(f"Test Accuracy: {results['test_accuracy']:.2f}")
-                print(f"Overfitting Gap: {results['overfitting_gap']:.2f}")
-                print(f"Balanced Accuracy Gap: {results['balanced_accuracy_gap']:.2f}")
-                print(f"Variables Used: {', '.join(results['variables_used'])}")
-                test_accuracies.append((model_type.capitalize(), results["test_accuracy"]))
+        for config, models in model_results.items():
+            if models:  # Ensure results exist for this configuration
+                for model_name, metrics in models.items():
+                    try:
+                        print(Fore.GREEN + f"\n{config.capitalize()} - {model_name.replace('_', ' ').capitalize()} Model Results:" + Style.RESET_ALL)
+                        print(f"Train Accuracy: {metrics['train_accuracy']:.2f}")
+                        print(f"Test Accuracy: {metrics['test_accuracy']:.2f}")
+                        print(f"Overfitting Gap: {metrics['overfitting_gap']:.2f}")
+                        print(f"Balanced Accuracy Gap: {metrics['balanced_accuracy_gap']:.2f}")
+                        print(f"Variables Used: {', '.join(metrics['variables_used'])}")
+
+                        # Store metrics for aggregated visualization
+                        all_metrics.append({
+                            "Configuration": config.capitalize(),
+                            "Model": model_name.replace('_', ' ').capitalize(),
+                            "Train Accuracy": metrics['train_accuracy'],
+                            "Test Accuracy": metrics['test_accuracy'],
+                            "Overfitting Gap": metrics['overfitting_gap'],
+                            "Balanced Accuracy Gap": metrics['balanced_accuracy_gap']
+                        })
+                    except KeyError as e:
+                        print(Fore.RED + f"Missing key in results: {e}" + Style.RESET_ALL)
             else:
-                print(Fore.YELLOW + f"No results logged for {model_type} model." + Style.RESET_ALL)
+                print(Fore.YELLOW + f"No results logged for {config} configuration." + Style.RESET_ALL)
 
-        # Determine the best model
-        if test_accuracies:
-            best_model = max(test_accuracies, key=lambda x: x[1])
-            print(Fore.CYAN + f"\nBest Performing Model:" + Style.RESET_ALL)
-            print(Fore.GREEN + f"{best_model[0]} Model with Test Accuracy: {best_model[1]:.2f}" + Style.RESET_ALL)
+        # Step 4: Generate Aggregated Performance Chart
+        if all_metrics:
+            generate_aggregated_performance_chart(all_metrics)
+        else:
+            print(Fore.RED + "No performance metrics available for visualization." + Style.RESET_ALL)
 
-        # Visualization: Test Accuracy Comparison
-        if test_accuracies:
-            model_names, accuracies = zip(*test_accuracies)
-            plt.figure(figsize=(10, 6))
-            plt.bar(model_names, accuracies, color="skyblue", edgecolor="black")
-            plt.title("Test Accuracy Comparison Across Models")
-            plt.ylabel("Test Accuracy")
-            plt.xlabel("Model")
-            plt.ylim(0, 1)
-            plt.grid(axis="y", linestyle="--", alpha=0.7)
-            plt.show()
+
+    def generate_aggregated_performance_chart(metrics):
+        """
+        Generates an aggregated performance chart for all model configurations and metrics.
+        """
+        # Convert metrics to DataFrame for easy manipulation
+        df = pd.DataFrame(metrics)
+
+        # Aggregated Accuracy Comparison
+        plt.figure(figsize=(12, 6))
+        sns.barplot(
+            data=df,
+            x="Configuration",
+            y="Test Accuracy",
+            hue="Model",
+            edgecolor="black",
+        )
+        plt.title("Test Accuracy Comparison Across Configurations and Models")
+        plt.ylabel("Test Accuracy")
+        plt.xlabel("Configuration")
+        plt.legend(title="Model")
+        plt.grid(axis="y", linestyle="--", alpha=0.7)
+        plt.show()
+
+        # Overfitting Gaps
+        plt.figure(figsize=(12, 6))
+        sns.barplot(
+            data=df,
+            x="Configuration",
+            y="Overfitting Gap",
+            hue="Model",
+            palette="coolwarm",
+            edgecolor="black",
+        )
+        plt.axhline(0, color="black", linestyle="--", linewidth=1)
+        plt.title("Overfitting Gap Across Configurations and Models")
+        plt.ylabel("Overfitting Gap (Train - Test Accuracy)")
+        plt.xlabel("Configuration")
+        plt.legend(title="Model")
+        plt.grid(axis="y", linestyle="--", alpha=0.7)
+        plt.show()
 
     submenu()

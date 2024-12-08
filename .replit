@@ -5,3 +5,4 @@ channel = "stable-24_05"
 
 [deployment]
 run = ["sh", "-c", "python ./scripts/main.py"]
+build = ["sh", "-c", "pip install -r requirements.txt"]
