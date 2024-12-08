@@ -5,11 +5,18 @@ import pandas as pd
 from rich.console import Console
 from rich.table import Table
 from colorama import Fore, Style
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import scipy.spatial.distance as ssd
+import numpy as np
 
 def analyze_data(data, response='response'):
     """
     Provide options for different EDA visualizations, including heatmaps, QQ plots, boxplots, response rate tables,
-    and bar charts/histograms.
+    and bar charts/histograms, along with clustering.
     """
     while True:
         print(Fore.CYAN + "\nExploratory Data Analysis Menu:")
@@ -20,6 +27,8 @@ def analyze_data(data, response='response'):
         print(Fore.YELLOW + "5. Generate Bar Charts and Histograms")
         print(Fore.YELLOW + "6. Analyze Month-on-Month Sales")
         print(Fore.YELLOW + "7. Identify Top 5 Products Based on Sales")
+        print(Fore.YELLOW + "8. Perform Cluster Analysis (K-Means & Hierarchical Clustering)")
+        print(Fore.YELLOW + "9. Perform Cluster Analysis (Outlier Removed)")
         print(Fore.YELLOW + "0. Return to main menu" + Style.RESET_ALL)
 
         choice = input(Fore.CYAN + "Choose an option: " + Style.RESET_ALL)
@@ -42,11 +51,17 @@ def analyze_data(data, response='response'):
         elif choice == '5':
             generate_bar_charts_and_histograms(data, response)
 
-        elif choice == '6':  # Call the new function
+        elif choice == '6':
             analyze_monthly_sales_from_original()
 
-        if choice == '7':
+        elif choice == '7':
             identify_top_products()
+
+        elif choice == '8':
+            perform_cluster_analysis(data)
+
+        elif choice == '9':
+            perform_cluster_analysis_outlier_removed(data)
 
         elif choice == '0':
             print(Fore.CYAN + "Returning to main menu..." + Style.RESET_ALL)
@@ -606,3 +621,180 @@ def identify_top_products():
 
     except Exception as e:
         console.print(f"Error during analysis: {str(e)}", style="bold red")
+
+def perform_cluster_analysis(data):
+    """
+    Perform cluster analysis using K-Means and Hierarchical Clustering.
+    Includes preprocessing, clustering, and visualization.
+    """
+    print(Fore.CYAN + "\nPerforming Cluster Analysis..." + Style.RESET_ALL)
+
+    # Step 1: Select numerical features for clustering
+    clustering_data = data.select_dtypes(include=['float64', 'int64']).copy()
+    if clustering_data.empty:
+        print(Fore.RED + "No numerical features available for clustering. Please preprocess your data." + Style.RESET_ALL)
+        return
+
+    # Step 2: Handle infinite or very large values
+    clustering_data.replace([np.inf, -np.inf], np.nan, inplace=True)
+    clustering_data.fillna(0, inplace=True)
+
+    # Step 3: Preprocess the data (Scaling)
+    scaler = StandardScaler()
+    try:
+        scaled_data = scaler.fit_transform(clustering_data)
+        print(Fore.GREEN + "✔ Data scaled successfully for clustering." + Style.RESET_ALL)
+    except Exception as e:
+        print(Fore.RED + f"Error during scaling: {e}" + Style.RESET_ALL)
+        return
+
+    # Step 4: Perform K-Means Clustering
+    print(Fore.CYAN + "Running K-Means Clustering..." + Style.RESET_ALL)
+    best_k = determine_optimal_clusters(scaled_data)
+    kmeans = KMeans(n_clusters=best_k, random_state=42)
+    kmeans_labels = kmeans.fit_predict(scaled_data)
+    clustering_data['KMeans_Cluster'] = kmeans_labels
+    print(Fore.GREEN + f"✔ K-Means clustering completed with {best_k} clusters." + Style.RESET_ALL)
+
+    # Visualize K-Means Clusters
+    visualize_clusters_2d(scaled_data, kmeans_labels, title="K-Means Clustering")
+
+    # Step 5: Perform Hierarchical Clustering
+    print(Fore.CYAN + "Running Hierarchical Clustering..." + Style.RESET_ALL)
+    hierarchical_linkage = linkage(scaled_data, method='ward')
+    clustering_data['Hierarchical_Cluster'] = fcluster(hierarchical_linkage, t=best_k, criterion='maxclust')
+    print(Fore.GREEN + "✔ Hierarchical clustering completed." + Style.RESET_ALL)
+
+    # Visualize Dendrogram
+    visualize_dendrogram(hierarchical_linkage)
+
+    # Save clustering results to CSV
+    clustering_data.to_csv('cluster_analysis_results.csv', index=False)
+    print(Fore.YELLOW + "Clustering results saved to 'cluster_analysis_results.csv'." + Style.RESET_ALL)
+
+def determine_optimal_clusters(data):
+    """
+    Determine the optimal number of clusters using the Elbow Method and Silhouette Score.
+    """
+    distortions = []
+    silhouette_scores = []
+    range_n_clusters = range(2, 11)
+
+    for k in range_n_clusters:
+        kmeans = KMeans(n_clusters=k, random_state=42)
+        kmeans.fit(data)
+        distortions.append(kmeans.inertia_)
+        silhouette_scores.append(silhouette_score(data, kmeans.labels_))
+
+    # Plot Elbow Method
+    plt.figure(figsize=(10, 6))
+    plt.plot(range_n_clusters, distortions, marker='o')
+    plt.title('Elbow Method for Optimal K')
+    plt.xlabel('Number of Clusters (K)')
+    plt.ylabel('Distortion')
+    plt.grid(alpha=0.3)
+    plt.show()
+
+    # Plot Silhouette Scores
+    plt.figure(figsize=(10, 6))
+    plt.plot(range_n_clusters, silhouette_scores, marker='o', color='orange')
+    plt.title('Silhouette Score for Optimal K')
+    plt.xlabel('Number of Clusters (K)')
+    plt.ylabel('Silhouette Score')
+    plt.grid(alpha=0.3)
+    plt.show()
+
+    # Return the number of clusters with the highest silhouette score
+    best_k = range_n_clusters[np.argmax(silhouette_scores)]
+    print(Fore.GREEN + f"Optimal number of clusters determined: {best_k}" + Style.RESET_ALL)
+    return best_k
+
+def visualize_clusters_2d(data, labels, title):
+    """
+    Visualize clusters in 2D space using PCA.
+    """
+    from sklearn.decomposition import PCA
+
+    pca = PCA(n_components=2)
+    reduced_data = pca.fit_transform(data)
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(reduced_data[:, 0], reduced_data[:, 1], c=labels, cmap='viridis', s=50, alpha=0.7)
+    plt.title(title)
+    plt.xlabel('PCA Component 1')
+    plt.ylabel('PCA Component 2')
+    plt.colorbar(label='Cluster')
+    plt.grid(alpha=0.3)
+    plt.show()
+
+def perform_cluster_analysis_outlier_removed(data):
+    """
+    Perform cluster analysis after removing outliers using the IQR method.
+    Includes preprocessing, clustering, and visualization.
+    """
+    print(Fore.CYAN + "\nPerforming Cluster Analysis (Outlier Removed)..." + Style.RESET_ALL)
+
+    # Step 1: Select numerical features for clustering
+    clustering_data = data.select_dtypes(include=['float64', 'int64']).copy()
+    if clustering_data.empty:
+        print(Fore.RED + "No numerical features available for clustering. Please preprocess your data." + Style.RESET_ALL)
+        return
+
+    # Step 2: Remove outliers using the IQR method
+    for col in clustering_data.columns:
+        Q1 = clustering_data[col].quantile(0.25)
+        Q3 = clustering_data[col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        clustering_data = clustering_data[(clustering_data[col] >= lower_bound) & (clustering_data[col] <= upper_bound)]
+    print(Fore.GREEN + "✔ Outliers removed using the IQR method." + Style.RESET_ALL)
+
+    # Step 3: Handle infinite or very large values
+    clustering_data.replace([np.inf, -np.inf], np.nan, inplace=True)
+    clustering_data.fillna(0, inplace=True)
+
+    # Step 4: Preprocess the data (Scaling)
+    scaler = StandardScaler()
+    try:
+        scaled_data = scaler.fit_transform(clustering_data)
+        print(Fore.GREEN + "✔ Data scaled successfully for clustering." + Style.RESET_ALL)
+    except Exception as e:
+        print(Fore.RED + f"Error during scaling: {e}" + Style.RESET_ALL)
+        return
+
+    # Step 5: Perform K-Means Clustering
+    print(Fore.CYAN + "Running K-Means Clustering..." + Style.RESET_ALL)
+    best_k = determine_optimal_clusters(scaled_data)
+    kmeans = KMeans(n_clusters=best_k, random_state=42)
+    kmeans_labels = kmeans.fit_predict(scaled_data)
+    clustering_data['KMeans_Cluster'] = kmeans_labels
+    print(Fore.GREEN + f"✔ K-Means clustering completed with {best_k} clusters." + Style.RESET_ALL)
+
+    # Visualize K-Means Clusters
+    visualize_clusters_2d(scaled_data, kmeans_labels, title="K-Means Clustering (Outlier Removed)")
+
+    # Step 6: Perform Hierarchical Clustering
+    print(Fore.CYAN + "Running Hierarchical Clustering..." + Style.RESET_ALL)
+    hierarchical_linkage = linkage(scaled_data, method='ward')
+    clustering_data['Hierarchical_Cluster'] = fcluster(hierarchical_linkage, t=best_k, criterion='maxclust')
+    print(Fore.GREEN + "✔ Hierarchical clustering completed." + Style.RESET_ALL)
+
+    # Visualize Dendrogram
+    visualize_dendrogram(hierarchical_linkage)
+
+    # Save clustering results to CSV
+    clustering_data.to_csv('cluster_analysis_outlier_removed_results.csv', index=False)
+    print(Fore.YELLOW + "Clustering results saved to 'cluster_analysis_outlier_removed_results.csv'." + Style.RESET_ALL)
+
+def visualize_dendrogram(linkage_matrix):
+    """
+    Visualize a dendrogram for hierarchical clustering.
+    """
+    plt.figure(figsize=(12, 8))
+    dendrogram(linkage_matrix, truncate_mode='lastp', p=10, leaf_rotation=45, leaf_font_size=12)
+    plt.title('Hierarchical Clustering Dendrogram')
+    plt.xlabel('Cluster Size')
+    plt.ylabel('Distance')
+    plt.grid(alpha=0.3)
+    plt.show()
