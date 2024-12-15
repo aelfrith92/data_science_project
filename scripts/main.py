@@ -4,14 +4,14 @@ import pandas as pd
 from colorama import Fore, Style, init
 
 # Add the modules directory to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'modules'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from integrity_checks import perform_integrity_checks
-from preprocessing import convert_data_types, convert_campaign_data_types, print_data_overview
-from missing_data_handling import process_missing_data
-from join_operations import derive_customer_features, perform_customer_campaign_join
-from predict_campaign_response import predict_customer_response
-from exploratory_analysis import analyze_data
+from modules.integrity_checks import perform_integrity_checks
+from modules.preprocessing import convert_data_types, convert_campaign_data_types, print_data_overview
+from modules.missing_data_handling import process_missing_data
+from modules.join_operations import derive_customer_features, perform_customer_campaign_join
+from modules.predict_campaign_response import predict_customer_response
+from modules.exploratory_analysis import analyze_data
 
 # In the main menu:
 def main():

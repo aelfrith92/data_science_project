@@ -5,6 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, auc
 from sklearn.tree import DecisionTreeClassifier, export_graphviz
 from sklearn.naive_bayes import GaussianNB
+from sklearn.svm import SVC
 from sklearn.preprocessing import LabelEncoder
 from graphviz import Source
 from statsmodels.stats.outliers_influence import variance_inflation_factor
@@ -28,21 +29,15 @@ global_logs = {
 }
 
 def preprocess_data_for_model(data):
-    """
-    Preprocess the dataset by converting datetime columns, handling categorical variables,
-    replacing missing values, and providing a detailed log of operations.
-    """
     data = data.copy()
     log_messages = []
 
-    # Handle datetime columns
     if 'first_purchase' in data.columns and 'last_purchase' in data.columns:
         data['customer_tenure_days'] = (data['last_purchase'] - data['first_purchase']).dt.days
         data['recency_days'] = (data['last_purchase'].max() - data['last_purchase']).dt.days
         data.drop(columns=['first_purchase', 'last_purchase'], inplace=True)
         log_messages.append("Converted 'first_purchase' and 'last_purchase' to 'customer_tenure_days' and 'recency_days'.")
 
-    # Handle missing or infinite values for numeric datetime-derived features
     numeric_features = ['customer_tenure_days', 'recency_days']
     for feature in numeric_features:
         if feature in data.columns:
@@ -56,14 +51,12 @@ def preprocess_data_for_model(data):
                 data[feature].fillna(median_value, inplace=True)
                 log_messages.append(f"Filled {nan_count} missing values in '{feature}' with median value {median_value}.")
 
-    # Scale numeric datetime-derived features
     scaler = StandardScaler()
     for feature in numeric_features:
         if feature in data.columns:
             data[feature] = scaler.fit_transform(data[[feature]])
             log_messages.append(f"Scaled numeric feature '{feature}' using StandardScaler.")
 
-    # Handle categorical variables
     categorical_fields = ['loyalty', 'nps', 'recency_bin', 'total_sales_bin', 'total_quantity_bin',
                           'avg_order_value_bin', 'customer_tenure_bin', 'order_frequency_bin']
 
@@ -89,7 +82,6 @@ def preprocess_data_for_model(data):
                 data[field] = data[field].cat.codes
                 log_messages.append(f"Converted binned categorical field '{field}' to numeric codes.")
 
-    # Replace infinities and handle remaining NaN values
     inf_count = data.isin([float('inf'), float('-inf')]).sum().sum()
     if inf_count > 0:
         data.replace([float('inf'), float('-inf')], pd.NA, inplace=True)
@@ -99,10 +91,8 @@ def preprocess_data_for_model(data):
     nan_count_after = data.isna().sum().sum()
     log_messages.append(f"Filled {nan_count_before - nan_count_after} remaining NaN values with 0.")
 
-    # Log preprocessing steps
     global_logs["preprocessing"]["steps"] = log_messages
 
-    # Print detailed log
     print(Fore.CYAN + "\nPreprocessing Log:" + Style.RESET_ALL)
     for message in log_messages:
         print(Fore.GREEN + "✔ " + message + Style.RESET_ALL)
@@ -110,14 +100,9 @@ def preprocess_data_for_model(data):
     return data
 
 def predict_customer_response(data, response='response'):
-    """
-    Predict customer response using Logistic Regression and Random Forest models.
-    Includes preprocessing, multicollinearity checks, feature significance analysis, and model execution.
-    """
     print(Fore.CYAN + "\nPredicting Customer Response..." + Style.RESET_ALL)
 
     def submenu():
-        """Submenu for configuring model parameters and running actions."""
         processed_data = None
 
         while True:
@@ -129,6 +114,8 @@ def predict_customer_response(data, response='response'):
             print("5. Run Models (with outlier removal, recoded variables, and scaling)")
             print("6. Summarize Results of All Models")
             print("7. Naive Bayes and Decision Trees")
+            print("8. SVM Models")  # --- SVM INTEGRATION START: Added new menu item
+            # --- SVM INTEGRATION END
             print("0. Return to Main Menu")
 
             choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
@@ -136,33 +123,19 @@ def predict_customer_response(data, response='response'):
             if choice == '1':
                 processed_data = preprocess_data_for_model(data)
                 print(Fore.GREEN + "Data preprocessing completed. Ready for modeling." + Style.RESET_ALL)
-            elif choice in {'2', '3', '4', '5', '6', '7'}:
-                # Check if processed_data is initialized
+            elif choice in {'2', '3', '4', '5', '6', '7', '8'}:
                 if processed_data is None:
                     print(Fore.RED + "Error: Data has not been preprocessed yet. Please select option 1 first." + Style.RESET_ALL)
                     continue
                 if choice == '2':
-                    # Preprocess the data
-                    # processed_data = preprocess_data_for_model(data)
-
-                    # Log the columns
                     print(Fore.CYAN + "\nColumns After Preprocessing:" + Style.RESET_ALL)
                     print(Fore.GREEN + ", ".join(processed_data.columns) + Style.RESET_ALL)
-
-                    # Handle multicollinearity
                     filtered_data = check_and_handle_multicollinearity(processed_data, response)
-
-                    # Log the columns
                     print(Fore.CYAN + "\nColumns After Multicollinearity Check:" + Style.RESET_ALL)
                     print(Fore.GREEN + ", ".join(filtered_data.columns) + Style.RESET_ALL)
-
-                    # Perform significance testing
                     significant_vars = explore_feature_significance(filtered_data, response)
-
-                    # Log the significant variables
                     print(Fore.CYAN + "\nSignificant Variables:" + Style.RESET_ALL)
                     print(Fore.GREEN + ", ".join(significant_vars) + Style.RESET_ALL)
-
                     if significant_vars:
                         configuration_key = "baseline"
                         run_models(filtered_data, significant_vars, response, configuration_key)
@@ -178,6 +151,9 @@ def predict_customer_response(data, response='response'):
                     summarize_results()
                 elif choice == '7':
                     run_model_evaluation_submenu(processed_data, response=response)
+                elif choice == '8':  # --- SVM INTEGRATION START: Call SVM submenu
+                    run_svm_evaluation_submenu(processed_data, response=response)
+                    # --- SVM INTEGRATION END
             elif choice == '0':
                 print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
                 break
@@ -185,16 +161,10 @@ def predict_customer_response(data, response='response'):
                 print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
 
     def check_and_handle_multicollinearity(data, response):
-        """
-        Check multicollinearity using VIF and iteratively remove variables with VIF > 5.
-        Modular function for repeated use across models.
-        """
         print(Fore.CYAN + "\nPerforming Multicollinearity Check..." + Style.RESET_ALL)
-
         log_messages = []
         X = data.select_dtypes(include=[np.number]).drop(columns=[response], errors='ignore')
 
-        # Handle missing and non-finite values
         if not np.isfinite(X).all().all():
             non_finite_count = (~np.isfinite(X)).sum().sum()
             print(Fore.YELLOW + f"Found {non_finite_count} non-finite values. Replacing with zeros." + Style.RESET_ALL)
@@ -226,7 +196,6 @@ def predict_customer_response(data, response='response'):
         global_logs["multicollinearity"]["vif"] = vif_data[-1].to_dict("records")
         global_logs["multicollinearity"]["steps"] = log_messages
 
-        # Final VIF Plot
         final_vif = vif_data[-1]
         plt.figure(figsize=(10, 6))
         sns.barplot(x="VIF", y="Feature", data=final_vif.sort_values("VIF", ascending=False), palette="coolwarm")
@@ -242,28 +211,20 @@ def predict_customer_response(data, response='response'):
         for log in log_messages:
             print(Fore.GREEN + "✔ " + log + Style.RESET_ALL)
 
-        # Reattach the response column
         filtered_data = pd.concat([X, data[response]], axis=1)
         return filtered_data
 
     def explore_feature_significance(data, response):
-        """
-        Perform feature significance analysis using logistic regression.
-        Modular function for repeated use across models.
-        """
         print(Fore.CYAN + "\nExploring Feature Significance..." + Style.RESET_ALL)
         X = data.drop(columns=[response]) if response in data.columns else data
         y = data[response]
 
-        # Add constant term for regression
         X_with_const = sm.add_constant(X)
         logit_model = sm.Logit(y, X_with_const).fit(disp=False)
 
-        # Extract p-values
-        pvalues = logit_model.pvalues[1:]  # Skip the constant term
+        pvalues = logit_model.pvalues[1:]
         pvalues.sort_values(inplace=True)
 
-        # Log-10 scale visualization
         plt.figure(figsize=(10, 6))
         sns.barplot(x=-np.log10(pvalues.values), y=pvalues.index, palette="coolwarm")
         plt.axvline(x=-np.log10(0.05), color='red', linestyle='--', label='-log10(0.05)')
@@ -274,14 +235,12 @@ def predict_customer_response(data, response='response'):
         plt.grid(alpha=0.3)
         plt.show()
 
-        # Log significant variables
         significant_vars = [
             var for var in logit_model.pvalues.index
             if var != 'const' and logit_model.pvalues[var] < 0.05
         ]
         global_logs["significance"]["variables"] = significant_vars
 
-        # Print logistic regression summary
         print(Fore.CYAN + "\nLogistic Regression Summary:" + Style.RESET_ALL)
         print(logit_model.summary())
         return significant_vars
@@ -293,14 +252,12 @@ def predict_customer_response(data, response='response'):
             print(Fore.RED + f"Error: The following significant variables are missing from the dataset: {missing_vars}" + Style.RESET_ALL)
             print(Fore.CYAN + "Available Columns in Data:" + Style.RESET_ALL)
             print(Fore.GREEN + ", ".join(data.columns) + Style.RESET_ALL)
-            return  # Exit the function to prevent further errors.
+            return
 
-        # Proceed only with valid significant variables
         significant_vars = [var for var in significant_vars if var in data.columns]
         X = data[significant_vars]
         y = data[response]
 
-        # Train-test split with improved validation
         while True:
             try:
                 train_size = float(input(Fore.YELLOW + "Enter train/test split ratio (e.g., 0.7 for 70% train): " + Style.RESET_ALL))
@@ -328,18 +285,14 @@ def predict_customer_response(data, response='response'):
             print(Fore.RED + "Invalid choice. Returning to submenu." + Style.RESET_ALL)
             return
 
-        # Train the selected model
         model.fit(X_train, y_train)
 
-        # Evaluate model performance on train and test datasets
         train_metrics = evaluate_model(y_train, model.predict(X_train), model.predict_proba(X_train)[:, 1], model_name, dataset_type="Train")
         test_metrics = evaluate_model(y_test, model.predict(X_test), model.predict_proba(X_test)[:, 1], model_name, train_metrics=train_metrics, dataset_type="Test")
 
-        # Initialize the configuration key in global_logs if not already initialized
         if global_logs["models"][configuration_key] is None:
             global_logs["models"][configuration_key] = {}
 
-        # Log results in global_logs
         model_key = f"{model_name.lower().replace(' ', '_')}_results"
         global_logs["models"][configuration_key][model_key] = {
             "train_accuracy": train_metrics.get("accuracy"),
@@ -351,32 +304,22 @@ def predict_customer_response(data, response='response'):
         print(Fore.GREEN + f"\n{model_name} Model Results logged: {global_logs['models'][configuration_key][model_key]}" + Style.RESET_ALL)
 
     def evaluate_model(y_true, y_pred, y_prob, model_name, train_metrics=None, dataset_type="Test"):
-        """
-        Evaluate models and log metrics, including confusion matrix, thresholds, and AUC.
-        Handles separate logs for train and test datasets.
-        """
         print(Fore.CYAN + f"\n{model_name} Evaluation on {dataset_type} Data:" + Style.RESET_ALL)
-
-        # Confusion Matrix
         cm = confusion_matrix(y_true, y_pred)
         tn, fp, fn, tp = cm.ravel()
 
-        # Metrics
         accuracy = (tp + tn) / (tp + tn + fp + fn)
         sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
         balanced_accuracy = (sensitivity + specificity) / 2
 
-        # Best Threshold
         fpr, tpr, thresholds = roc_curve(y_true, y_prob)
         optimal_idx = np.argmax(tpr - fpr)
         best_threshold = thresholds[optimal_idx]
 
-        # Log Metrics
         print(f"Accuracy: {accuracy:.2f}, Sensitivity: {sensitivity:.2f}, Specificity: {specificity:.2f}, Balanced Accuracy: {balanced_accuracy:.2f}")
         print(f"Best Threshold: {best_threshold:.2f}")
 
-        # Overfitting Assessment (for test data only)
         if train_metrics is not None and dataset_type == "Test":
             print(Fore.YELLOW + "\nOverfitting Assessment:" + Style.RESET_ALL)
             print(f"Train-Test Accuracy Gap: {train_metrics['accuracy'] - accuracy:.2f}")
@@ -384,7 +327,6 @@ def predict_customer_response(data, response='response'):
             if abs(train_metrics['accuracy'] - accuracy) > 0.1:
                 print(Fore.RED + "Warning: Potential Overfitting Detected (Accuracy Gap > 0.1)." + Style.RESET_ALL)
 
-        # Save Confusion Matrix Plot
         plt.figure()
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['No', 'Yes'], yticklabels=['No', 'Yes'])
         plt.title(f"Confusion Matrix ({model_name}, {dataset_type})")
@@ -393,7 +335,6 @@ def predict_customer_response(data, response='response'):
         plt.savefig(f"./assets/imgs/confusion_matrix_{model_name}_{dataset_type.lower()}.png")
         plt.show()
 
-        # Save ROC Curve
         plt.figure()
         plt.plot(fpr, tpr, label=f"AUC = {auc(fpr, tpr):.2f}")
         plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
@@ -405,7 +346,6 @@ def predict_customer_response(data, response='response'):
         plt.savefig(f"./assets/imgs/roc_curve_{model_name}_{dataset_type.lower()}.png")
         plt.show()
 
-        # Return Metrics
         return {
             "accuracy": accuracy,
             "sensitivity": sensitivity,
@@ -415,32 +355,21 @@ def predict_customer_response(data, response='response'):
         }
 
     def run_models_with_recoded_variables(data, response):
-        """
-        Run models with recoded variables and scaling.
-        Includes multicollinearity checks and significance reassessment.
-        """
         print(Fore.CYAN + "\nRunning Models with Recoded Variables..." + Style.RESET_ALL)
-
-        # Preprocessing
         data = preprocess_data_for_model(data)
 
-        # Add Recoded Variables
         if 'num_orders' in data.columns and 'recency_days' in data.columns:
             data['recency_ratio'] = data['recency_days'] / (data['num_orders'] + 1e-5)
             data['complaint_ratio'] = data['n_comp'] / (data['num_orders'] + 1e-5)
             print(Fore.GREEN + "✔ Added 'recency_ratio' and 'complaint_ratio' to the dataset." + Style.RESET_ALL)
 
-        # Scale Features
         scaler = StandardScaler()
         for feature in ['recency_ratio', 'complaint_ratio']:
             if feature in data.columns:
                 data[feature] = scaler.fit_transform(data[[feature]])
                 print(Fore.GREEN + f"✔ Scaled feature '{feature}' using StandardScaler." + Style.RESET_ALL)
 
-        # Multicollinearity Check
         data = check_and_handle_multicollinearity(data, response)
-
-        # Significance Analysis
         significant_vars = explore_feature_significance(data, response)
 
         if not significant_vars:
@@ -448,19 +377,12 @@ def predict_customer_response(data, response='response'):
             return
 
         configuration_key = "recoded"
-        # Run Models
         run_models(data, significant_vars, response, configuration_key)
 
     def run_models_with_outlier_removal(data, response):
-        """
-        Run models with outlier removal, multicollinearity checks, and significance reassessment.
-        """
         print(Fore.CYAN + "\nRunning Models with Outlier Removal..." + Style.RESET_ALL)
-
-        # Preprocessing
         data = preprocess_data_for_model(data)
 
-        # Remove Outliers
         numerical_fields = data.select_dtypes(include=['float64', 'int64']).columns
         for field in numerical_fields:
             if field == response:
@@ -474,10 +396,7 @@ def predict_customer_response(data, response='response'):
             data = data[~outliers]
             print(Fore.GREEN + f"Removed outliers from '{field}'." + Style.RESET_ALL)
 
-        # Multicollinearity Check
         data = check_and_handle_multicollinearity(data, response)
-
-        # Significance Analysis
         significant_vars = explore_feature_significance(data, response)
 
         if not significant_vars:
@@ -485,54 +404,40 @@ def predict_customer_response(data, response='response'):
             return
 
         configuration_key = "outlier_removed"
-        # Run Models
         run_models(data, significant_vars, response, configuration_key)
 
     def no_outliers_and_recoded_scaled_variables(data, response='response'):
-        """
-        Run models with outlier removal, recoded variables, and scaling.
-        Includes multicollinearity checks and significance reassessment.
-        Logs results into `global_logs`.
-        """
         print(Fore.CYAN + "\nRunning Models with Outlier Removal, Recoded Variables, and Scaling..." + Style.RESET_ALL)
-
-        # Step 1: Preprocessing
         processed_data = preprocess_data_for_model(data)
 
-        # Step 2: Adding Recoded Variables
         if 'num_orders' in processed_data.columns and 'recency_days' in processed_data.columns:
             processed_data['recency_ratio'] = processed_data['recency_days'] / (processed_data['num_orders'] + 1e-5)
             processed_data['complaint_ratio'] = processed_data['n_comp'] / (processed_data['num_orders'] + 1e-5)
             print(Fore.GREEN + "✔ Added 'recency_ratio' and 'complaint_ratio' to the dataset." + Style.RESET_ALL)
 
-        # Step 3: Scaling Recoded Features
         scaler = StandardScaler()
         for feature in ['recency_ratio', 'complaint_ratio']:
             if feature in processed_data.columns:
                 processed_data[feature] = scaler.fit_transform(processed_data[[feature]])
                 print(Fore.GREEN + f"✔ Scaled numeric feature '{feature}' using StandardScaler." + Style.RESET_ALL)
 
-        # Step 4: Detect and Remove Outliers
         numerical_fields = processed_data.select_dtypes(include=['float64', 'int64']).columns
         outlier_logs = []
 
         for field in numerical_fields:
             if field == response:
-                continue  # Skip the response field
+                continue
             Q1 = processed_data[field].quantile(0.25)
             Q3 = processed_data[field].quantile(0.75)
             IQR = Q3 - Q1
             lower_bound = Q1 - 1.5 * IQR
             upper_bound = Q3 + 1.5 * IQR
-
-            # Detect and remove outliers
             outliers = ((processed_data[field] < lower_bound) | (processed_data[field] > upper_bound))
             outlier_count = outliers.sum()
             if outlier_count > 0:
                 processed_data = processed_data[~outliers]
                 outlier_logs.append(f"Removed {outlier_count} outliers from '{field}'. Remaining rows: {len(processed_data)}")
 
-        # Log outlier removal results
         if outlier_logs:
             print(Fore.GREEN + "\nOutlier Removal Summary:" + Style.RESET_ALL)
             for log in outlier_logs:
@@ -540,32 +445,21 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.YELLOW + "No outliers detected for numerical fields." + Style.RESET_ALL)
 
-        # Step 5: Multicollinearity Check
         print(Fore.CYAN + "\nChecking Multicollinearity..." + Style.RESET_ALL)
         filtered_data = check_and_handle_multicollinearity(processed_data, response)
 
-        # Step 6: Reassess Significance
         print(Fore.CYAN + "\nPerforming Significance Testing..." + Style.RESET_ALL)
         significant_vars = explore_feature_significance(filtered_data, response)
 
-        # Step 7: Run Models
         if significant_vars:
             print(Fore.CYAN + "\nRunning Models on Cleaned Dataset with Recoded Variables..." + Style.RESET_ALL)
             configuration_key = "outlier_recoded_scaled"
-            # Run Models
             run_models(filtered_data, significant_vars, response, configuration_key)
         else:
             print(Fore.RED + "No significant variables identified after outlier removal and multicollinearity checks." + Style.RESET_ALL)
-            return
 
     def summarize_results():
-        """
-        Summarizes preprocessing, multicollinearity checks, significance analysis, and model performance.
-        Visualizes aggregated performance metrics for all models and configurations.
-        """
         print(Fore.CYAN + "\nSummary of All Model Runs:" + Style.RESET_ALL)
-
-        # Step 1: Preprocessing Overview
         print(Fore.CYAN + "\nPreprocessing Summary:" + Style.RESET_ALL)
         preprocessing_steps = global_logs.get("preprocessing", {}).get("steps", [])
         if preprocessing_steps:
@@ -574,7 +468,6 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.YELLOW + "No preprocessing steps logged." + Style.RESET_ALL)
 
-        # Step 2: Multicollinearity Results
         print(Fore.CYAN + "\nMulticollinearity Checks:" + Style.RESET_ALL)
         vif_results = global_logs.get("multicollinearity", {}).get("vif")
         if vif_results:
@@ -584,13 +477,12 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.YELLOW + "No multicollinearity results logged." + Style.RESET_ALL)
 
-        # Step 3: Model Performance Comparison
         print(Fore.CYAN + "\nModel Performance Comparison:" + Style.RESET_ALL)
         model_results = global_logs.get("models", {})
         all_metrics = []
 
         for config, models in model_results.items():
-            if models:  # Ensure results exist for this configuration
+            if models:
                 for model_name, metrics in models.items():
                     try:
                         print(Fore.GREEN + f"\n{config.capitalize()} - {model_name.replace('_', ' ').capitalize()} Model Results:" + Style.RESET_ALL)
@@ -600,7 +492,6 @@ def predict_customer_response(data, response='response'):
                         print(f"Balanced Accuracy Gap: {metrics['balanced_accuracy_gap']:.2f}")
                         print(f"Variables Used: {', '.join(metrics['variables_used'])}")
 
-                        # Store metrics for aggregated visualization
                         all_metrics.append({
                             "Configuration": config.capitalize(),
                             "Model": model_name.replace('_', ' ').capitalize(),
@@ -614,20 +505,14 @@ def predict_customer_response(data, response='response'):
             else:
                 print(Fore.YELLOW + f"No results logged for {config} configuration." + Style.RESET_ALL)
 
-        # Step 4: Generate Aggregated Performance Chart
         if all_metrics:
             generate_aggregated_performance_chart(all_metrics)
         else:
             print(Fore.RED + "No performance metrics available for visualization." + Style.RESET_ALL)
 
     def generate_aggregated_performance_chart(metrics):
-        """
-        Generates an aggregated performance chart for all model configurations and metrics.
-        """
-        # Convert metrics to DataFrame for easy manipulation
         df = pd.DataFrame(metrics)
 
-        # Aggregated Accuracy Comparison
         plt.figure(figsize=(12, 6))
         sns.barplot(
             data=df,
@@ -643,7 +528,6 @@ def predict_customer_response(data, response='response'):
         plt.grid(axis="y", linestyle="--", alpha=0.7)
         plt.show()
 
-        # Overfitting Gaps
         plt.figure(figsize=(12, 6))
         sns.barplot(
             data=df,
@@ -662,14 +546,9 @@ def predict_customer_response(data, response='response'):
         plt.show()
 
     def preprocess_for_configuration(data, config_key, response="response"):
-        """
-        Preprocess the data based on the selected configuration.
-        Returns the modified dataset.
-        """
         processed_data = preprocess_data_for_model(data)
 
         if config_key == "baseline":
-            # Perform multicollinearity and significance checks
             processed_data = check_and_handle_multicollinearity(processed_data, response)
             significant_vars = explore_feature_significance(processed_data, response)
             if significant_vars:
@@ -677,7 +556,6 @@ def predict_customer_response(data, response='response'):
             return processed_data
 
         if config_key == "recoded":
-            # Add derived features and scale them
             if 'num_orders' in processed_data.columns and 'recency_days' in processed_data.columns:
                 processed_data['recency_ratio'] = processed_data['recency_days'] / (processed_data['num_orders'] + 1e-5)
                 processed_data['complaint_ratio'] = processed_data['n_comp'] / (processed_data['num_orders'] + 1e-5)
@@ -688,7 +566,6 @@ def predict_customer_response(data, response='response'):
                 if field in processed_data.columns:
                     processed_data[field] = scaler.fit_transform(processed_data[[field]])
 
-            # Perform multicollinearity and significance checks
             processed_data = check_and_handle_multicollinearity(processed_data, response)
             significant_vars = explore_feature_significance(processed_data, response)
             if significant_vars:
@@ -696,7 +573,6 @@ def predict_customer_response(data, response='response'):
             return processed_data
 
         if config_key == "outlier_removed":
-            # Remove outliers
             numerical_fields = processed_data.select_dtypes(include=['float64', 'int64']).columns
             for field in numerical_fields:
                 if field == response:
@@ -708,7 +584,6 @@ def predict_customer_response(data, response='response'):
                 upper_bound = Q3 + 1.5 * IQR
                 processed_data = processed_data[(processed_data[field] >= lower_bound) & (processed_data[field] <= upper_bound)]
 
-            # Perform multicollinearity and significance checks
             processed_data = check_and_handle_multicollinearity(processed_data, response)
             significant_vars = explore_feature_significance(processed_data, response)
             if significant_vars:
@@ -716,7 +591,6 @@ def predict_customer_response(data, response='response'):
             return processed_data
 
         if config_key == "outlier_recoded_scaled":
-            # Combine outlier removal and recoded logic
             processed_data = preprocess_for_configuration(data, "recoded", response)
             numerical_fields = processed_data.select_dtypes(include=['float64', 'int64']).columns
             for field in numerical_fields:
@@ -731,10 +605,6 @@ def predict_customer_response(data, response='response'):
             return processed_data
 
     def run_model_evaluation_submenu(processed_data, response="response"):
-        """
-        Submenu for evaluating Naïve Bayes and Decision Tree across configurations, 
-        including binned variables for Decision Tree.
-        """
         from sklearn.naive_bayes import GaussianNB
         from sklearn.tree import DecisionTreeClassifier
 
@@ -790,30 +660,21 @@ def predict_customer_response(data, response='response'):
                 print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
 
     def evaluate_model_performance(y_true, y_pred, y_prob, model_name, dataset_type):
-        """
-        Evaluate model performance and return key metrics.
-        Includes confusion matrix, AUC, and ROC Curve.
-        """
         print(Fore.CYAN + f"\nEvaluating {model_name} on {dataset_type} Data..." + Style.RESET_ALL)
-
-        # Confusion Matrix
         cm = confusion_matrix(y_true, y_pred)
         tn, fp, fn, tp = cm.ravel()
 
-        # Calculate Metrics
         accuracy = accuracy_score(y_true, y_pred)
         precision = precision_score(y_true, y_pred, zero_division=0)
-        recall = recall_score(y_true, y_pred, zero_division=0)  # Sensitivity
-        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0  # Specificity
+        recall = recall_score(y_true, y_pred, zero_division=0)
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
         f1 = f1_score(y_true, y_pred, zero_division=0)
         fpr, tpr, thresholds = roc_curve(y_true, y_prob)
         auc_score = auc(fpr, tpr)
 
-        # Print Metrics
         print(f"Accuracy: {accuracy:.2f}, Precision: {precision:.2f}, Recall (Sensitivity): {recall:.2f}")
         print(f"Specificity: {specificity:.2f}, F1 Score: {f1:.2f}, AUC: {auc_score:.2f}")
 
-        # Save and Display Confusion Matrix
         plt.figure()
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['No', 'Yes'], yticklabels=['No', 'Yes'])
         plt.title(f"Confusion Matrix ({model_name}, {dataset_type})")
@@ -821,7 +682,6 @@ def predict_customer_response(data, response='response'):
         plt.ylabel("Actual")
         plt.show()
 
-        # Save and Display ROC Curve
         plt.figure()
         plt.plot(fpr, tpr, label=f"AUC = {auc_score:.2f}")
         plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
@@ -832,7 +692,6 @@ def predict_customer_response(data, response='response'):
         plt.grid(alpha=0.3)
         plt.show()
 
-        # Return Metrics as a Dictionary
         return {
             "accuracy": accuracy,
             "precision": precision,
@@ -840,60 +699,41 @@ def predict_customer_response(data, response='response'):
             "specificity": specificity,
             "f1_score": f1,
             "auc": auc_score,
-            "confusion_matrix": cm.tolist()  # Save as a list for logging
+            "confusion_matrix": cm.tolist()
         }
 
     def evaluate_naive_bayes(config_key, data, response="response"):
         print(Fore.CYAN + f"\nRunning Naïve Bayes for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
-
-        # Preprocess data for the given configuration
         filtered_data = preprocess_for_configuration(data, config_key, response)
 
-        # Train-test split
         X_train, X_test, y_train, y_test = train_test_split(
             filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
         )
 
-        # Train Naïve Bayes
         model = GaussianNB()
         model.fit(X_train, y_train)
 
-        # Evaluate Train Data
         y_train_pred = model.predict(X_train)
         y_train_prob = model.predict_proba(X_train)[:, 1]
         train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Naive Bayes", "Train")
 
-        # Evaluate Test Data
         y_test_pred = model.predict(X_test)
         y_test_prob = model.predict_proba(X_test)[:, 1]
         test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Naive Bayes", "Test")
 
-        # Log Results
         global_logs["models"][config_key]["naive_bayes_results"] = {
             "train_metrics": train_metrics,
             "test_metrics": test_metrics,
         }
 
     def evaluate_decision_tree(config_key, data, response="response"):
-        """
-        Train and evaluate Decision Tree for the given configuration.
-
-        Parameters:
-        - config_key: Configuration key (e.g., 'baseline', 'recoded')
-        - data: Input dataset
-        - response: Target variable
-        """
         print(Fore.CYAN + f"\nRunning Decision Tree for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
-
-        # Preprocess data for the given configuration
         filtered_data = preprocess_for_configuration(data, config_key, response)
 
-        # Train-test split
         X_train, X_test, y_train, y_test = train_test_split(
             filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
         )
 
-        # Train Decision Tree
         model = DecisionTreeClassifier(random_state=42)
         model.fit(X_train, y_train)
 
@@ -901,21 +741,18 @@ def predict_customer_response(data, response='response'):
             model=model,
             feature_names=X_train.columns,
             class_names=["No", "Yes"],
-            config_key=config_key,  # Pass the configuration key
+            config_key=config_key,
             file_name="decision_tree_visualization"
         )
 
-        # Evaluate Train Data
         y_train_pred = model.predict(X_train)
         y_train_prob = model.predict_proba(X_train)[:, 1]
         train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Decision Tree", "Train")
 
-        # Evaluate Test Data
         y_test_pred = model.predict(X_test)
         y_test_prob = model.predict_proba(X_test)[:, 1]
         test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Decision Tree", "Test")
 
-        # Log Results
         if config_key not in global_logs["models"]:
             global_logs["models"][config_key] = {}
         global_logs["models"][config_key]["decision_tree_results"] = {
@@ -924,13 +761,7 @@ def predict_customer_response(data, response='response'):
         }
 
     def visualize_decision_tree(model, feature_names, class_names, config_key=None, file_name="tree_visualization"):
-        """
-        Visualizes the decision tree and saves it as an image.
-        """
-        from sklearn.tree import export_graphviz
-        from graphviz import Source
 
-        # Append `config_key` to the file name if provided
         if config_key:
             file_name = f"{file_name}_{config_key}"
 
@@ -948,18 +779,11 @@ def predict_customer_response(data, response='response'):
         print(f"Decision tree visualization saved as {file_name}.png")
 
     def compare_all_models_auc():
-        """
-        Compare AUC for all models across configurations and visualize the results.
-        """
         print(Fore.CYAN + "\nComparing AUC for All Models..." + Style.RESET_ALL)
-
         metrics = []
-
-        # Iterate through all configurations and model results
         for config, models in global_logs["models"].items():
             for model_name, results in models.items():
                 try:
-                    # Extract train and test AUC if available
                     train_auc = results.get("train_metrics", {}).get("auc", None)
                     test_auc = results.get("test_metrics", {}).get("auc", None)
 
@@ -975,15 +799,11 @@ def predict_customer_response(data, response='response'):
                 except Exception as e:
                     print(Fore.RED + f"Error processing {model_name} for {config}: {e}" + Style.RESET_ALL)
 
-        # Check if any metrics were collected
         if not metrics:
             print(Fore.RED + "No AUC data available for comparison." + Style.RESET_ALL)
             return
 
-        # Convert metrics to DataFrame for visualization
         df = pd.DataFrame(metrics)
-
-        # Generate bar chart for Test AUC
         plt.figure(figsize=(12, 6))
         sns.barplot(data=df, x="Configuration", y="Test AUC", hue="Model", edgecolor="black")
         plt.title("Test AUC Comparison Across Configurations and Models")
@@ -994,42 +814,25 @@ def predict_customer_response(data, response='response'):
         plt.show()
 
     def bin_numerical_variables(data, response="response"):
-        """
-        Bins numerical variables based on quartiles (IQR strategy) while removing outliers for the binning process.
-        Encodes the binned variables into numerical labels for compatibility with machine learning models.
-
-        Parameters:
-        - data: The input DataFrame.
-        - response: The target variable (excluded from binning).
-
-        Returns:
-        - DataFrame with binned numerical variables encoded as numerical labels.
-        """
         print(Fore.CYAN + "\nBinning Numerical Variables..." + Style.RESET_ALL)
-
         binned_data = data.copy()
         numerical_cols = binned_data.select_dtypes(include=['float64', 'int64']).columns
         binned_logs = []
 
         for col in numerical_cols:
             if col == response:
-                continue  # Skip the target variable
+                continue
 
-            # Calculate quartiles and IQR
             Q1 = binned_data[col].quantile(0.25)
             Q3 = binned_data[col].quantile(0.75)
             IQR = Q3 - Q1
             lower_bound = Q1 - 1.5 * IQR
             upper_bound = Q3 + 1.5 * IQR
-
-            # Remove outliers for binning purposes
             non_outliers = binned_data[(binned_data[col] >= lower_bound) & (binned_data[col] <= upper_bound)][col]
 
-            # Define bins and labels based on quartiles
             bins = [-float('inf'), non_outliers.quantile(0.25), non_outliers.median(), non_outliers.quantile(0.75), float('inf')]
             labels = [f"{col}_low", f"{col}_medium", f"{col}_high", f"{col}_very_high"]
 
-            # Ensure unique bin edges and apply binning
             try:
                 binned_data[col] = pd.cut(
                     binned_data[col],
@@ -1037,7 +840,6 @@ def predict_customer_response(data, response='response'):
                     labels=labels,
                     include_lowest=True,
                 )
-                # Convert binned categories to numeric labels
                 le = LabelEncoder()
                 binned_data[col] = le.fit_transform(binned_data[col].astype(str))
                 binned_logs.append(f"Binned and encoded '{col}' into quartile-based categories: {labels}")
@@ -1051,28 +853,14 @@ def predict_customer_response(data, response='response'):
         return binned_data
 
     def evaluate_decision_tree_binned(config_key, data, response="response"):
-        """
-        Train and evaluate Decision Tree for the given configuration after binning numerical variables.
-
-        Parameters:
-        - config_key: Configuration key (e.g., 'baseline', 'recoded')
-        - data: Input dataset
-        - response: Target variable
-        """
         print(Fore.CYAN + f"\nRunning Decision Tree with Binned Variables for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
-
-        # Preprocess data for the given configuration
         filtered_data = preprocess_for_configuration(data, config_key, response)
-
-        # Bin numerical variables for decision trees
         filtered_data = bin_numerical_variables(filtered_data, response=response)
 
-        # Train-test split
         X_train, X_test, y_train, y_test = train_test_split(
             filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
         )
 
-        # Train Decision Tree
         model = DecisionTreeClassifier(random_state=42)
         model.fit(X_train, y_train)
 
@@ -1080,24 +868,82 @@ def predict_customer_response(data, response='response'):
             model=model,
             feature_names=X_train.columns,
             class_names=["No", "Yes"],
-            config_key=f"{config_key}_binned",  # Append "_binned" to config key
+            config_key=f"{config_key}_binned",
             file_name="decision_tree_visualization_binned"
         )
 
-        # Evaluate Train Data
         y_train_pred = model.predict(X_train)
         y_train_prob = model.predict_proba(X_train)[:, 1]
         train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Decision Tree (Binned)", "Train")
 
-        # Evaluate Test Data
         y_test_pred = model.predict(X_test)
         y_test_prob = model.predict_proba(X_test)[:, 1]
         test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Decision Tree (Binned)", "Test")
 
-        # Log Results
         if config_key not in global_logs["models"]:
             global_logs["models"][config_key] = {}
         global_logs["models"][config_key]["decision_tree_binned_results"] = {
+            "train_metrics": train_metrics,
+            "test_metrics": test_metrics,
+        }
+
+    def run_svm_evaluation_submenu(processed_data, response="response"):
+        """
+        Submenu for evaluating SVM models across configurations.
+        """
+        while True:
+            print(Fore.CYAN + "\nEvaluate SVM Models:" + Style.RESET_ALL)
+            print("1. Run SVM (Baseline)")
+            print("2. Run SVM (Recoded)")
+            print("3. Run SVM (Outlier Removed)")
+            print("4. Run SVM (Outlier Recoded Scaled)")
+            print("5. Compare AUC for All Models")
+            print("0. Return to Main Menu")
+
+            choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
+
+            if choice == '1':
+                evaluate_svm("baseline", processed_data, response)
+            elif choice == '2':
+                evaluate_svm("recoded", processed_data, response)
+            elif choice == '3':
+                evaluate_svm("outlier_removed", processed_data, response)
+            elif choice == '4':
+                evaluate_svm("outlier_recoded_scaled", processed_data, response)
+            elif choice == '5':
+                compare_all_models_auc()
+            elif choice == '0':
+                print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
+                break
+            else:
+                print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
+
+    def evaluate_svm(config_key, data, response="response"):
+        """
+        Evaluate SVM model for a given configuration.
+        """
+        print(Fore.CYAN + f"\nRunning SVM for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
+        filtered_data = preprocess_for_configuration(data, config_key, response)
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
+        )
+
+        # Train SVM with probability estimates enabled
+        model = SVC(probability=True, kernel='rbf', C=1.0, gamma='scale', random_state=42)
+        model.fit(X_train, y_train)
+
+        y_train_pred = model.predict(X_train)
+        y_train_prob = model.predict_proba(X_train)[:, 1]
+        train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "SVM", "Train")
+
+        y_test_pred = model.predict(X_test)
+        y_test_prob = model.predict_proba(X_test)[:, 1]
+        test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "SVM", "Test")
+
+        if config_key not in global_logs["models"]:
+            global_logs["models"][config_key] = {}
+        global_logs["models"][config_key]["svm_results"] = {
             "train_metrics": train_metrics,
             "test_metrics": test_metrics,
         }
