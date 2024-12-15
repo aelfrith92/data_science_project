@@ -1,3 +1,4 @@
+import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
@@ -15,6 +16,8 @@ import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
 from colorama import Fore, Style, init
+# importing the module which handles plots saving
+from modules.saving import ensure_dir, ASSETS_DIR
 
 global_logs = {
     "preprocessing": {},
@@ -151,9 +154,8 @@ def predict_customer_response(data, response='response'):
                     summarize_results()
                 elif choice == '7':
                     run_model_evaluation_submenu(processed_data, response=response)
-                elif choice == '8':  # --- SVM INTEGRATION START: Call SVM submenu
+                elif choice == '8': 
                     run_svm_evaluation_submenu(processed_data, response=response)
-                    # --- SVM INTEGRATION END
             elif choice == '0':
                 print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
                 break
@@ -205,6 +207,9 @@ def predict_customer_response(data, response='response'):
         plt.ylabel("Feature")
         plt.legend()
         plt.grid(alpha=0.3)
+        vif_dir = os.path.join(ASSETS_DIR, "vif_plots")
+        ensure_dir(vif_dir)
+        plt.savefig(os.path.join(vif_dir, "final_vif_plot.png"))
         plt.show()
 
         print(Fore.CYAN + "\nMulticollinearity Log:" + Style.RESET_ALL)
@@ -233,6 +238,9 @@ def predict_customer_response(data, response='response'):
         plt.ylabel("Variable")
         plt.legend()
         plt.grid(alpha=0.3)
+        significance_dir = os.path.join(ASSETS_DIR, "feature_significance")
+        ensure_dir(significance_dir)
+        plt.savefig(os.path.join(significance_dir, "feature_significance_barplot.png"))
         plt.show()
 
         significant_vars = [
@@ -332,7 +340,9 @@ def predict_customer_response(data, response='response'):
         plt.title(f"Confusion Matrix ({model_name}, {dataset_type})")
         plt.xlabel("Predicted")
         plt.ylabel("Actual")
-        plt.savefig(f"./assets/imgs/confusion_matrix_{model_name}_{dataset_type.lower()}.png")
+        cm_dir = os.path.join(ASSETS_DIR, "confusion_matrices")
+        ensure_dir(cm_dir)
+        plt.savefig(os.path.join(cm_dir, f"confusion_matrix_{model_name}_{dataset_type.lower()}.png"))
         plt.show()
 
         plt.figure()
@@ -343,7 +353,9 @@ def predict_customer_response(data, response='response'):
         plt.ylabel("True Positive Rate")
         plt.legend(loc="lower right")
         plt.grid(alpha=0.3)
-        plt.savefig(f"./assets/imgs/roc_curve_{model_name}_{dataset_type.lower()}.png")
+        roc_dir = os.path.join(ASSETS_DIR, "roc_curves")
+        ensure_dir(roc_dir)
+        plt.savefig(os.path.join(roc_dir, f"roc_curve_{model_name}_{dataset_type.lower()}.png"))
         plt.show()
 
         return {
@@ -526,6 +538,9 @@ def predict_customer_response(data, response='response'):
         plt.xlabel("Configuration")
         plt.legend(title="Model")
         plt.grid(axis="y", linestyle="--", alpha=0.7)
+        aggregated_dir = os.path.join(ASSETS_DIR, "aggregated_metrics")
+        ensure_dir(aggregated_dir)
+        plt.savefig(os.path.join(aggregated_dir, "test_accuracy_comparison.png"))
         plt.show()
 
         plt.figure(figsize=(12, 6))
@@ -543,6 +558,9 @@ def predict_customer_response(data, response='response'):
         plt.xlabel("Configuration")
         plt.legend(title="Model")
         plt.grid(axis="y", linestyle="--", alpha=0.7)
+        aggregated_dir = os.path.join(ASSETS_DIR, "aggregated_metrics")
+        ensure_dir(aggregated_dir)
+        plt.savefig(os.path.join(aggregated_dir, "overfitting_gap_comparison.png"))
         plt.show()
 
     def preprocess_for_configuration(data, config_key, response="response"):
@@ -680,6 +698,9 @@ def predict_customer_response(data, response='response'):
         plt.title(f"Confusion Matrix ({model_name}, {dataset_type})")
         plt.xlabel("Predicted")
         plt.ylabel("Actual")
+        cm_dir = os.path.join(ASSETS_DIR, "confusion_matrices")
+        ensure_dir(cm_dir)
+        plt.savefig(os.path.join(cm_dir, f"confusion_matrix_{model_name}_{dataset_type.lower()}.png"))
         plt.show()
 
         plt.figure()
@@ -690,6 +711,9 @@ def predict_customer_response(data, response='response'):
         plt.ylabel("True Positive Rate")
         plt.legend(loc="lower right")
         plt.grid(alpha=0.3)
+        roc_dir = os.path.join(ASSETS_DIR, "roc_curves")
+        ensure_dir(roc_dir)
+        plt.savefig(os.path.join(roc_dir, f"roc_curve_{model_name}_{dataset_type.lower()}.png"))
         plt.show()
 
         return {
@@ -811,6 +835,9 @@ def predict_customer_response(data, response='response'):
         plt.xlabel("Configuration")
         plt.legend(title="Model")
         plt.grid(axis="y", linestyle="--", alpha=0.7)
+        aggregated_dir = os.path.join(ASSETS_DIR, "aggregated_metrics")
+        ensure_dir(aggregated_dir)
+        plt.savefig(os.path.join(aggregated_dir, "test_auc_comparison.png"))
         plt.show()
 
     def bin_numerical_variables(data, response="response"):

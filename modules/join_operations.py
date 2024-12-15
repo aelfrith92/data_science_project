@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from colorama import Fore, Style
 from rich.console import Console
 from rich.table import Table
+# importing the module which handles plots saving
+from modules.saving import ensure_dir, ASSETS_DIR
 
 console = Console()
 
@@ -38,6 +40,9 @@ def perform_customer_campaign_join(customer_features, campaign_response_data):
     explode = (0.1, 0)  # Highlight the 'Responded' slice
     plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors, explode=explode)
     plt.title("Campaign Response Distribution")
+    pie_dir = os.path.join(ASSETS_DIR, "pie_charts")
+    ensure_dir(pie_dir)
+    plt.savefig(os.path.join(pie_dir, "campaign_response.png"))
     plt.show()
 
     # Step 5: List the columns and their data types after the join
@@ -153,22 +158,7 @@ def derive_customer_features(joined_data):
     customer_returns = joined_data[joined_data['Quantity'] < 0].groupby('CustomerID')['Quantity'].sum().abs()
     customer_features['return_rate'] = customer_features['CustomerID'].map(customer_returns) / customer_features['total_quantity']
     customer_features['return_rate'] = customer_features['return_rate'].fillna(0)  # Handle missing values
-
-    # # Step 4: Create Binned Categorical Variables (preserving the originals)
-    # def create_bins(column, column_name):
-    #     no_outliers = column[column < column.quantile(0.95)]  # Exclude outliers
-    #     if len(no_outliers) < 2:  # Ensure sufficient data for binning
-    #         console.print(f"[red]Insufficient data for binning {column_name}. Skipping binning.[/red]")
-    #         return pd.NA
-    #     bins = pd.qcut(no_outliers, q=4, duplicates='drop', retbins=True)[1]
-    #     return pd.cut(column, bins=bins, include_lowest=True)
-
-    # customer_features['recency_bin'] = create_bins(customer_features['recency'], 'recency')
-    # customer_features['total_quantity_bin'] = create_bins(customer_features['total_quantity'], 'total_quantity')
-    # customer_features['avg_order_value_bin'] = create_bins(customer_features['avg_order_value'], 'avg_order_value')
-    # customer_features['customer_tenure_bin'] = create_bins(customer_features['customer_tenure'], 'customer_tenure')
-    # customer_features['order_frequency_bin'] = create_bins(customer_features['order_frequency'], 'order_frequency')
-
+    
     # Apply the updated function to all binned variables
     customer_features['recency_bin'] = create_categorical_bins(customer_features['recency'], 'recency')
     customer_features['total_quantity_bin'] = create_categorical_bins(customer_features['total_quantity'], 'total_quantity')

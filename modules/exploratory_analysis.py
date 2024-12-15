@@ -1,3 +1,4 @@
+import os
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
@@ -12,6 +13,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import scipy.spatial.distance as ssd
 import numpy as np
+# importing the module which handles plots saving
+from modules.saving import ensure_dir, ASSETS_DIR
 
 def analyze_data(data, response='response'):
     """
@@ -96,6 +99,9 @@ def generate_correlation_heatmap(data, response):
     plt.figure(figsize=(12, 8))
     sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
     plt.title(f'Correlation Heatmap (Excluding Non-Informative Variables, Including {response})')
+    heatmap_dir = os.path.join(ASSETS_DIR, "heatmaps")
+    ensure_dir(heatmap_dir)
+    plt.savefig(os.path.join(heatmap_dir, "correlation_heatmap.png"))
     plt.show()
 
 def generate_qq_plots_matrix(data, outliers_included):
@@ -162,6 +168,9 @@ def generate_qq_plots_matrix(data, outliers_included):
 
     # Adjust layout for better visualization
     plt.tight_layout(rect=[0, 0, 1, 0.95])
+    qq_dir = os.path.join(ASSETS_DIR, "qq_plots")
+    ensure_dir(qq_dir)
+    plt.savefig(os.path.join(qq_dir, f"qq_plot_{var}.png"))
     plt.show()
 
 def generate_bar_plot(data, variable, response):
@@ -172,6 +181,9 @@ def generate_bar_plot(data, variable, response):
     plt.figure(figsize=(8, 6))
     sns.countplot(x=variable, hue=response, data=data)
     plt.title(f'{variable} by {response}')
+    bar_charts = os.path.join(ASSETS_DIR, "bar_charts")
+    ensure_dir(bar_charts)
+    plt.savefig(os.path.join(bar_charts, f"bar_plot_{variable}_{response}.png"))
     plt.show()
 
 def generate_boxplots_by_response(data, response='response'):
@@ -267,6 +279,9 @@ def generate_loyalty_bar_plot(data, response='response'):
     plt.legend(title='Response', labels=['Not Responded', 'Responded'])
     plt.grid(alpha=0.3)
     plt.tight_layout()
+    bar_dir = os.path.join(ASSETS_DIR, "bar_dir")
+    ensure_dir(bar_dir)
+    plt.savefig(os.path.join(bar_dir, "response_by_loyalty.png"))
     plt.show()
 
 def generate_boxplot(data, variable, response):
@@ -278,6 +293,9 @@ def generate_boxplot(data, variable, response):
     sns.boxplot(x=response, y=variable, data=data)
     plt.title(f'{variable} by {response}')
     plt.grid(alpha=0.3)
+    boxplot_dir = os.path.join(ASSETS_DIR, "boxplots")
+    ensure_dir(boxplot_dir)
+    plt.savefig(os.path.join(boxplot_dir, f"boxplot_{variable}_{response}.png"))
     plt.show()
 
 def generate_stacked_histograms(data, variables, response):
@@ -286,6 +304,9 @@ def generate_stacked_histograms(data, variables, response):
     for var in variables:
         sns.histplot(data, x=var, hue=response, multiple="stack", bins=30)
         plt.title(f'{var} Distribution Split by {response}')
+        hist_dir = os.path.join(ASSETS_DIR, "histograms")
+        ensure_dir(hist_dir)
+        plt.savefig(os.path.join(hist_dir, f"histogram_{var}_{response}.png"))
         plt.show()
 
 def exclude_outliers_iqr(df, columns):
@@ -478,6 +499,9 @@ def generate_bar_chart(data, feature, response):
     )
     plt.ylabel(feature.capitalize())
     plt.grid(alpha=0.3)
+    barchart_dir = os.path.join(ASSETS_DIR, "bar_charts")
+    ensure_dir(barchart_dir)
+    plt.savefig(os.path.join(barchart_dir, f"bar_chart_{feature}_{response}.png"))
     plt.show()
 
 def analyze_monthly_sales_from_original():
@@ -557,6 +581,9 @@ def analyze_monthly_sales_from_original():
     plt.xlabel('Month')
     plt.ylabel('Total Sales')
     plt.grid(alpha=0.3)
+    sales_trend_dir = os.path.join(ASSETS_DIR, "sales_trend")
+    ensure_dir(sales_trend_dir)
+    plt.savefig(os.path.join(sales_trend_dir, f"sales_trend.png"))
     plt.show()
 
 def identify_top_products():
@@ -617,6 +644,9 @@ def identify_top_products():
         plt.ylabel("Product Description")
         plt.grid(axis='x', alpha=0.3)
         plt.tight_layout()
+        top_products_dir = os.path.join(ASSETS_DIR, "top_products")
+        ensure_dir(top_products_dir)
+        plt.savefig(os.path.join(top_products_dir, "top_products_dir.png"))
         plt.show()
 
     except Exception as e:
@@ -669,8 +699,8 @@ def perform_cluster_analysis(data):
     visualize_dendrogram(hierarchical_linkage)
 
     # Save clustering results to CSV
-    clustering_data.to_csv('cluster_analysis_results.csv', index=False)
-    print(Fore.YELLOW + "Clustering results saved to 'cluster_analysis_results.csv'." + Style.RESET_ALL)
+    # clustering_data.to_csv('cluster_analysis_results.csv', index=False)
+    # print(Fore.YELLOW + "Clustering results saved to 'cluster_analysis_results.csv'." + Style.RESET_ALL)
 
 def determine_optimal_clusters(data):
     """
@@ -693,6 +723,9 @@ def determine_optimal_clusters(data):
     plt.xlabel('Number of Clusters (K)')
     plt.ylabel('Distortion')
     plt.grid(alpha=0.3)
+    clustering_dir = os.path.join(ASSETS_DIR, "clustering")
+    ensure_dir(clustering_dir)
+    plt.savefig(os.path.join(clustering_dir, f"elbow_method.png"))
     plt.show()
 
     # Plot Silhouette Scores
@@ -702,6 +735,9 @@ def determine_optimal_clusters(data):
     plt.xlabel('Number of Clusters (K)')
     plt.ylabel('Silhouette Score')
     plt.grid(alpha=0.3)
+    clustering_dir = os.path.join(ASSETS_DIR, "clustering")
+    ensure_dir(clustering_dir)
+    plt.savefig(os.path.join(clustering_dir, f"silhouette_score.png"))
     plt.show()
 
     # Return the number of clusters with the highest silhouette score
@@ -725,6 +761,9 @@ def visualize_clusters_2d(data, labels, title):
     plt.ylabel('PCA Component 2')
     plt.colorbar(label='Cluster')
     plt.grid(alpha=0.3)
+    clustering_dir = os.path.join(ASSETS_DIR, "clustering")
+    ensure_dir(clustering_dir)
+    plt.savefig(os.path.join(clustering_dir, "kmeans_pca_clusters.png"))
     plt.show()
 
 def perform_cluster_analysis_outlier_removed(data):
@@ -797,4 +836,7 @@ def visualize_dendrogram(linkage_matrix):
     plt.xlabel('Cluster Size')
     plt.ylabel('Distance')
     plt.grid(alpha=0.3)
+    clustering_dir = os.path.join(ASSETS_DIR, "clustering")
+    ensure_dir(clustering_dir)
+    plt.savefig(os.path.join(clustering_dir, "dendrogram.png"))
     plt.show()
