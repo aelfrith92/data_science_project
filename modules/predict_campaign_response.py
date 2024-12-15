@@ -799,7 +799,11 @@ def predict_customer_response(data, response='response'):
             special_characters=True
         )
         graph = Source(dot_data)
-        graph.render(file_name, format="png", cleanup=True)
+        # Decide on the output directory for decision trees
+        dt_dir = os.path.join(ASSETS_DIR, "decision_trees")
+        ensure_dir(dt_dir)
+        output_path = os.path.join(dt_dir, file_name)
+        graph.render(output_path, format="png", cleanup=True)
         print(f"Decision tree visualization saved as {file_name}.png")
 
     def compare_all_models_auc():
