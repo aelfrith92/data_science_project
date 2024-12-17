@@ -1,4 +1,5 @@
 import os
+import re
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
@@ -15,8 +16,7 @@ import numpy as np
 import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
-from colorama import Fore, Style, init
-# importing the module which handles plots saving
+from colorama import Fore, Style
 from modules.saving import ensure_dir, ASSETS_DIR
 
 global_logs = {
@@ -102,65 +102,279 @@ def preprocess_data_for_model(data):
 
     return data
 
+def clean_string_to_snake_case(input_string):
+    """
+    Convert a string to lowercase, replacing spaces and special characters with underscores.
+
+    Args:
+        input_string (str): The input string to clean.
+
+    Returns:
+        str: The cleaned string in snake_case format.
+    """
+    # Step 1: Convert to lowercase
+    lowercased = input_string.lower()
+    
+    # Step 2: Replace all non-alphanumeric characters (except spaces) with a space
+    no_specials = re.sub(r'[^a-z0-9\s]', ' ', lowercased)
+    
+    # Step 3: Replace spaces (including consecutive spaces) with a single underscore
+    snake_case = re.sub(r'\s+', '_', no_specials)
+    
+    # Step 4: Trim leading/trailing underscores (if any)
+    cleaned_string = snake_case.strip('_')
+    
+    return cleaned_string
+
 def predict_customer_response(data, response='response'):
     print(Fore.CYAN + "\nPredicting Customer Response..." + Style.RESET_ALL)
 
-    def submenu():
-        processed_data = None
+    processed_data = None
 
+    def main_submenu():
         while True:
             print(Fore.CYAN + "\nCustomer Response Prediction Submenu:" + Style.RESET_ALL)
             print("1. Preprocess Data")
-            print("2. Run Models (Baseline)")
-            print("3. Run Models (with recoded variables and scaling)")
-            print("4. Run Models (with outlier removal)")
-            print("5. Run Models (with outlier removal, recoded variables, and scaling)")
+            print("2. Model Selection Menu")
             print("6. Summarize Results of All Models")
-            print("7. Naive Bayes and Decision Trees")
-            print("8. SVM Models")  # --- SVM INTEGRATION START: Added new menu item
-            # --- SVM INTEGRATION END
             print("0. Return to Main Menu")
 
             choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
 
             if choice == '1':
+                nonlocal processed_data
                 processed_data = preprocess_data_for_model(data)
                 print(Fore.GREEN + "Data preprocessing completed. Ready for modeling." + Style.RESET_ALL)
-            elif choice in {'2', '3', '4', '5', '6', '7', '8'}:
+            elif choice == '2':
                 if processed_data is None:
-                    print(Fore.RED + "Error: Data has not been preprocessed yet. Please select option 1 first." + Style.RESET_ALL)
-                    continue
-                if choice == '2':
-                    print(Fore.CYAN + "\nColumns After Preprocessing:" + Style.RESET_ALL)
-                    print(Fore.GREEN + ", ".join(processed_data.columns) + Style.RESET_ALL)
-                    filtered_data = check_and_handle_multicollinearity(processed_data, response)
-                    print(Fore.CYAN + "\nColumns After Multicollinearity Check:" + Style.RESET_ALL)
-                    print(Fore.GREEN + ", ".join(filtered_data.columns) + Style.RESET_ALL)
-                    significant_vars = explore_feature_significance(filtered_data, response)
-                    print(Fore.CYAN + "\nSignificant Variables:" + Style.RESET_ALL)
-                    print(Fore.GREEN + ", ".join(significant_vars) + Style.RESET_ALL)
-                    if significant_vars:
-                        configuration_key = "baseline"
-                        run_models(filtered_data, significant_vars, response, configuration_key)
-                    else:
-                        print(Fore.RED + "No significant variables found for baseline model." + Style.RESET_ALL)
-                elif choice == '3':
-                    run_models_with_recoded_variables(processed_data, response=response)
-                elif choice == '4':
-                    run_models_with_outlier_removal(processed_data, response=response)
-                elif choice == '5':
-                    no_outliers_and_recoded_scaled_variables(processed_data, response=response)
-                elif choice == '6':
-                    summarize_results()
-                elif choice == '7':
-                    run_model_evaluation_submenu(processed_data, response=response)
-                elif choice == '8': 
-                    run_svm_evaluation_submenu(processed_data, response=response)
+                    print(Fore.RED + "Error: Data not preprocessed. Please select option 1 first." + Style.RESET_ALL)
+                else:
+                    model_selection_menu(processed_data, response)
+            elif choice == '6':
+                summarize_results()
             elif choice == '0':
                 print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
                 break
             else:
                 print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
+
+    def model_selection_menu(processed_data, response):
+        while True:
+            print(Fore.CYAN + "\nModel Selection Menu:" + Style.RESET_ALL)
+            print("1. Logistic Regression (BLR)")
+            print("2. Random Forest (RF)")
+            print("3. Naive Bayes")
+            print("4. Decision Tree")
+            print("5. SVM")
+            print("6. Decision Tree (Binned First)")
+            print("7. Decision Tree (Binned After)")
+            print("0. Return to Previous Menu")
+
+            choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
+
+            if choice == '1':
+                configuration_menu(processed_data, response, model_type='logistic_regression')
+            elif choice == '2':
+                configuration_menu(processed_data, response, model_type='random_forest')
+            elif choice == '3':
+                configuration_menu(processed_data, response, model_type='naive_bayes')
+            elif choice == '4':
+                configuration_menu(processed_data, response, model_type='decision_tree')
+            elif choice == '5':
+                configuration_menu(processed_data, response, model_type='svm')
+            elif choice == '6':
+                configuration_menu(processed_data, response, model_type='decision_tree_binned')
+            elif choice == '7':
+                configuration_menu(processed_data, response, model_type='decision_tree_binned_after')
+            elif choice == '0':
+                print(Fore.CYAN + "Returning to Previous Menu..." + Style.RESET_ALL)
+                break
+            else:
+                print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
+
+    def configuration_menu(processed_data, response, model_type):
+        while True:
+            print(Fore.CYAN + f"\nConfiguration Menu for {model_type.capitalize()}:" + Style.RESET_ALL)
+            print("1. Baseline")
+            print("2. Recoded")
+            print("3. Outlier Removed")
+            print("4. Outlier Recoded Scaled")
+            print("0. Return to Previous Menu")
+
+            choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
+
+            if choice in {'1', '2', '3', '4'}:
+                config_map = {
+                    '1': 'baseline',
+                    '2': 'recoded',
+                    '3': 'outlier_removed',
+                    '4': 'outlier_recoded_scaled'
+                }
+                configuration_key = config_map[choice]
+                run_selected_configuration(processed_data, response, model_type, configuration_key)
+            elif choice == '0':
+                print(Fore.CYAN + "Returning to Previous Menu..." + Style.RESET_ALL)
+                break
+            else:
+                print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
+
+    def run_selected_configuration(processed_data, response, model_type, configuration_key):
+        # Prompt the user for train/test ratio
+        while True:
+            try:
+                train_size = float(input(Fore.YELLOW + "Enter train/test split ratio (e.g., 0.7 for 70% train): " + Style.RESET_ALL))
+                if 0.0 < train_size < 1.0:
+                    break
+                else:
+                    print(Fore.RED + "Invalid input. Please enter a value between 0.0 and 1.0." + Style.RESET_ALL)
+            except ValueError:
+                print(Fore.RED + "Invalid input. Please enter a numeric value." + Style.RESET_ALL)
+
+        if configuration_key == 'baseline':
+            # For model_type decision tree binned first we need to bin variables before performing other tasks
+            # On the other hand, if we choose the model type with binned after, variables will be binned afted multic and significance
+            if model_type == 'decision_tree_binned':
+                processed_data = bin_numerical_variables(processed_data, response)
+
+            # For baseline, we do significance checks and then call run_models
+            filtered_data = check_and_handle_multicollinearity(processed_data, response)
+            significant_vars = explore_feature_significance(filtered_data, response)
+
+            # Bin variables after multicollinearity and significance checks
+            if model_type == "decision_tree_binned_after":
+                data = bin_numerical_variables(data, response)
+        
+            if not significant_vars:
+                print(Fore.RED + "No significant variables found for baseline model." + Style.RESET_ALL)
+                return
+            
+            # Here we select the model based on model_type (passed from previous menus)
+            if model_type == 'logistic_regression':
+                model = LogisticRegression(max_iter=1000)
+                model_name = "Logistic Regression"
+            elif model_type == 'random_forest':
+                model = RandomForestClassifier(n_estimators=100, random_state=42)
+                model_name = "Random Forest"
+            elif model_type == 'naive_bayes':
+                model = GaussianNB()
+                model_name = "Naive Bayes"
+            elif model_type == 'decision_tree':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree"
+            elif model_type == 'svm':
+                model = SVC(probability=True, random_state=42)
+                model_name = "SVM"
+            elif model_type == 'decision_tree_binned':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned First)"
+            elif model_type == 'decision_tree_binned_after':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned After)"
+            else:
+                print(Fore.RED + "Unsupported model type for baseline configuration." + Style.RESET_ALL)
+                return
+            
+            # Now call run_models with model and model_name
+            run_models(filtered_data, significant_vars, response, configuration_key, model, model_name, train_size)
+
+        elif configuration_key == 'recoded':
+            # For model_type decision tree binned we need to bin variables before performing other tasks
+            if model_type == 'decision_tree_binned':
+                processed_data = bin_numerical_variables(processed_data, response)
+            # Select model
+            if model_type == 'logistic_regression':
+                model = LogisticRegression(max_iter=1000)
+                model_name = "Logistic Regression"
+            elif model_type == 'random_forest':
+                model = RandomForestClassifier(n_estimators=100, random_state=42)
+                model_name = "Random Forest"
+            elif model_type == 'naive_bayes':
+                model = GaussianNB()
+                model_name = "Naive Bayes"
+            elif model_type == 'decision_tree':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree"
+            elif model_type == 'svm':
+                model = SVC(probability=True, random_state=42)
+                model_name = "SVM"
+            elif model_type == 'decision_tree_binned':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned First)"
+            elif model_type == 'decision_tree_binned_after':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned After)"
+            else:
+                print(Fore.RED + "Unsupported model type for recoded configuration." + Style.RESET_ALL)
+                return
+
+            # Pass model, model_name, train_size to the specialized function
+            run_models_with_recoded_variables(processed_data, response, model, model_name, train_size)
+
+        elif configuration_key == 'outlier_removed':
+            # For model_type decision tree binned we need to bin variables before performing other tasks
+            if model_type == 'decision_tree_binned':
+                processed_data = bin_numerical_variables(processed_data, response)
+            # Select model
+            if model_type == 'logistic_regression':
+                model = LogisticRegression(max_iter=1000)
+                model_name = "Logistic Regression"
+            elif model_type == 'random_forest':
+                model = RandomForestClassifier(n_estimators=100, random_state=42)
+                model_name = "Random Forest"
+            elif model_type == 'naive_bayes':
+                model = GaussianNB()
+                model_name = "Naive Bayes"
+            elif model_type == 'decision_tree':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree"
+            elif model_type == 'svm':
+                model = SVC(probability=True, random_state=42)
+                model_name = "SVM"
+            elif model_type == 'decision_tree_binned':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned First)"
+            elif model_type == 'decision_tree_binned_after':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned After)"
+            else:
+                print(Fore.RED + "Unsupported model type for outlier_removed configuration." + Style.RESET_ALL)
+                return
+
+            # Pass model, model_name, train_size to the specialized function
+            run_models_with_outlier_removal(processed_data, response, model, model_name, train_size)
+
+        elif configuration_key == 'outlier_recoded_scaled':
+            # For model_type decision tree binned we need to bin variables before performing other tasks
+            if model_type == 'decision_tree_binned':
+                processed_data = bin_numerical_variables(processed_data, response)
+            # Select model based on model_type
+            if model_type == 'logistic_regression':
+                model = LogisticRegression(max_iter=1000)
+                model_name = "Logistic Regression"
+            elif model_type == 'random_forest':
+                model = RandomForestClassifier(n_estimators=100, random_state=42)
+                model_name = "Random Forest"
+            elif model_type == 'naive_bayes':
+                model = GaussianNB()
+                model_name = "Naive Bayes"
+            elif model_type == 'decision_tree':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree"
+            elif model_type == 'svm':
+                model = SVC(probability=True, random_state=42)
+                model_name = "SVM"
+            elif model_type == 'decision_tree_binned':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned First)"
+            elif model_type == 'decision_tree_binned_after':
+                model = DecisionTreeClassifier(random_state=42)
+                model_name = "Decision Tree (Binned After)"
+            else:
+                print(Fore.RED + "Unsupported model type for outlier_recoded_scaled configuration." + Style.RESET_ALL)
+                return
+
+            # Now call no_outliers_and_recoded_scaled_variables with model, model_name, and train_size
+            no_outliers_and_recoded_scaled_variables(processed_data, response, model, model_name, train_size)
 
     def check_and_handle_multicollinearity(data, response):
         print(Fore.CYAN + "\nPerforming Multicollinearity Check..." + Style.RESET_ALL)
@@ -253,7 +467,7 @@ def predict_customer_response(data, response='response'):
         print(logit_model.summary())
         return significant_vars
 
-    def run_models(data, significant_vars, response, configuration_key):
+    def run_models(data, significant_vars, response, configuration_key, model, model_name, train_size):
         print(Fore.CYAN + "\nValidating Significant Variables Against Data Columns..." + Style.RESET_ALL)
         missing_vars = [var for var in significant_vars if var not in data.columns]
         if missing_vars:
@@ -266,35 +480,20 @@ def predict_customer_response(data, response='response'):
         X = data[significant_vars]
         y = data[response]
 
-        while True:
-            try:
-                train_size = float(input(Fore.YELLOW + "Enter train/test split ratio (e.g., 0.7 for 70% train): " + Style.RESET_ALL))
-                if 0.0 < train_size < 1.0:
-                    break
-                else:
-                    print(Fore.RED + "Invalid input. Please enter a value between 0.0 and 1.0." + Style.RESET_ALL)
-            except ValueError:
-                print(Fore.RED + "Invalid input. Please enter a numeric value." + Style.RESET_ALL)
-
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=(1 - train_size), random_state=42)
-
-        print(Fore.CYAN + "\nSelect Model:" + Style.RESET_ALL)
-        print("1. Logistic Regression")
-        print("2. Random Forest")
-        model_choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
-
-        if model_choice == '1':
-            model = LogisticRegression(max_iter=1000)
-            model_name = "Logistic Regression"
-        elif model_choice == '2':
-            model = RandomForestClassifier(n_estimators=100, random_state=42)
-            model_name = "Random Forest"
-        else:
-            print(Fore.RED + "Invalid choice. Returning to submenu." + Style.RESET_ALL)
-            return
-
         model.fit(X_train, y_train)
-
+        
+        # **Decision Tree Visualization**
+        if isinstance(model, DecisionTreeClassifier):
+            print(Fore.CYAN + "\nVisualizing Decision Tree..." + Style.RESET_ALL)
+            visualize_decision_tree(
+                model=model,
+                feature_names=X.columns,
+                class_names=["No", "Yes"],
+                config_key=configuration_key,
+                file_name=f"{clean_string_to_snake_case(model_name)}_{configuration_key}"
+            )
+        
         train_metrics = evaluate_model(y_train, model.predict(X_train), model.predict_proba(X_train)[:, 1], model_name, dataset_type="Train")
         test_metrics = evaluate_model(y_test, model.predict(X_test), model.predict_proba(X_test)[:, 1], model_name, train_metrics=train_metrics, dataset_type="Test")
 
@@ -342,7 +541,7 @@ def predict_customer_response(data, response='response'):
         plt.ylabel("Actual")
         cm_dir = os.path.join(ASSETS_DIR, "confusion_matrices")
         ensure_dir(cm_dir)
-        plt.savefig(os.path.join(cm_dir, f"confusion_matrix_{model_name}_{dataset_type.lower()}.png"))
+        plt.savefig(os.path.join(cm_dir, f"confusion_matrix_{clean_string_to_snake_case(model_name)}_{dataset_type.lower()}.png"))
         plt.show()
 
         plt.figure()
@@ -355,7 +554,7 @@ def predict_customer_response(data, response='response'):
         plt.grid(alpha=0.3)
         roc_dir = os.path.join(ASSETS_DIR, "roc_curves")
         ensure_dir(roc_dir)
-        plt.savefig(os.path.join(roc_dir, f"roc_curve_{model_name}_{dataset_type.lower()}.png"))
+        plt.savefig(os.path.join(roc_dir, f"roc_curve_{clean_string_to_snake_case(model_name)}_{dataset_type.lower()}.png"))
         plt.show()
 
         return {
@@ -366,8 +565,7 @@ def predict_customer_response(data, response='response'):
             "best_threshold": best_threshold,
         }
 
-    def run_models_with_recoded_variables(data, response):
-        print(Fore.CYAN + "\nRunning Models with Recoded Variables..." + Style.RESET_ALL)
+    def run_models_with_recoded_variables(data, response, model, model_name, train_size):
         data = preprocess_data_for_model(data)
 
         if 'num_orders' in data.columns and 'recency_days' in data.columns:
@@ -384,15 +582,19 @@ def predict_customer_response(data, response='response'):
         data = check_and_handle_multicollinearity(data, response)
         significant_vars = explore_feature_significance(data, response)
 
+        # Bin variables after multicollinearity and significance checks
+        if model_name == "Decision Tree (Binned After)":
+            data = bin_numerical_variables(data, response)
+        
         if not significant_vars:
             print(Fore.RED + "No significant variables found after multicollinearity checks." + Style.RESET_ALL)
             return
 
         configuration_key = "recoded"
-        run_models(data, significant_vars, response, configuration_key)
+        # Now include model, model_name, train_size:
+        run_models(data, significant_vars, response, configuration_key, model, model_name, train_size)
 
-    def run_models_with_outlier_removal(data, response):
-        print(Fore.CYAN + "\nRunning Models with Outlier Removal..." + Style.RESET_ALL)
+    def run_models_with_outlier_removal(data, response, model, model_name, train_size):
         data = preprocess_data_for_model(data)
 
         numerical_fields = data.select_dtypes(include=['float64', 'int64']).columns
@@ -411,15 +613,18 @@ def predict_customer_response(data, response='response'):
         data = check_and_handle_multicollinearity(data, response)
         significant_vars = explore_feature_significance(data, response)
 
+        # Bin variables after multicollinearity and significance checks
+        if model_name == "Decision Tree (Binned After)":
+            data = bin_numerical_variables(data, response)
+
         if not significant_vars:
             print(Fore.RED + "No significant variables found after multicollinearity checks." + Style.RESET_ALL)
             return
 
         configuration_key = "outlier_removed"
-        run_models(data, significant_vars, response, configuration_key)
+        run_models(data, significant_vars, response, configuration_key, model, model_name, train_size)
 
-    def no_outliers_and_recoded_scaled_variables(data, response='response'):
-        print(Fore.CYAN + "\nRunning Models with Outlier Removal, Recoded Variables, and Scaling..." + Style.RESET_ALL)
+    def no_outliers_and_recoded_scaled_variables(data, response, model, model_name, train_size):
         processed_data = preprocess_data_for_model(data)
 
         if 'num_orders' in processed_data.columns and 'recency_days' in processed_data.columns:
@@ -463,10 +668,14 @@ def predict_customer_response(data, response='response'):
         print(Fore.CYAN + "\nPerforming Significance Testing..." + Style.RESET_ALL)
         significant_vars = explore_feature_significance(filtered_data, response)
 
+        # Bin variables after multicollinearity and significance checks
+        if model_name == "Decision Tree (Binned After)":
+            filtered_data = bin_numerical_variables(data, response)
+        
         if significant_vars:
             print(Fore.CYAN + "\nRunning Models on Cleaned Dataset with Recoded Variables..." + Style.RESET_ALL)
-            configuration_key = "outlier_recoded_scaled"
-            run_models(filtered_data, significant_vars, response, configuration_key)
+            # Now we have model, model_name, and train_size from run_selected_configuration()
+            run_models(filtered_data, significant_vars, response, "outlier_recoded_scaled", model, model_name, train_size)
         else:
             print(Fore.RED + "No significant variables identified after outlier removal and multicollinearity checks." + Style.RESET_ALL)
 
@@ -622,168 +831,6 @@ def predict_customer_response(data, response='response'):
                 processed_data = processed_data[(processed_data[field] >= lower_bound) & (processed_data[field] <= upper_bound)]
             return processed_data
 
-    def run_model_evaluation_submenu(processed_data, response="response"):
-        from sklearn.naive_bayes import GaussianNB
-        from sklearn.tree import DecisionTreeClassifier
-
-        while True:
-            print(Fore.CYAN + "\nEvaluate Naïve Bayes and Decision Tree Models:" + Style.RESET_ALL)
-            print("1. Run Naïve Bayes (Baseline)")
-            print("2. Run Naïve Bayes (Recoded)")
-            print("3. Run Naïve Bayes (Outlier Removed)")
-            print("4. Run Naïve Bayes (Outlier Recoded Scaled)")
-            print("5. Run Decision Tree (Baseline)")
-            print("6. Run Decision Tree (Recoded)")
-            print("7. Run Decision Tree (Outlier Removed)")
-            print("8. Run Decision Tree (Outlier Recoded Scaled)")
-            print("9. Run Decision Tree (Baseline - Binned)")
-            print("10. Run Decision Tree (Recoded - Binned)")
-            print("11. Run Decision Tree (Outlier Removed - Binned)")
-            print("12. Run Decision Tree (Outlier Recoded Scaled - Binned)")
-            print("13. Compare AUC for All Models")
-            print("0. Return to Main Menu")
-
-            choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
-
-            if choice == '1':
-                evaluate_naive_bayes("baseline", processed_data, response)
-            elif choice == '2':
-                evaluate_naive_bayes("recoded", processed_data, response)
-            elif choice == '3':
-                evaluate_naive_bayes("outlier_removed", processed_data, response)
-            elif choice == '4':
-                evaluate_naive_bayes("outlier_recoded_scaled", processed_data, response)
-            elif choice == '5':
-                evaluate_decision_tree("baseline", processed_data, response)
-            elif choice == '6':
-                evaluate_decision_tree("recoded", processed_data, response)
-            elif choice == '7':
-                evaluate_decision_tree("outlier_removed", processed_data, response)
-            elif choice == '8':
-                evaluate_decision_tree("outlier_recoded_scaled", processed_data, response)
-            elif choice == '9':
-                evaluate_decision_tree_binned("baseline", processed_data, response)
-            elif choice == '10':
-                evaluate_decision_tree_binned("recoded", processed_data, response)
-            elif choice == '11':
-                evaluate_decision_tree_binned("outlier_removed", processed_data, response)
-            elif choice == '12':
-                evaluate_decision_tree_binned("outlier_recoded_scaled", processed_data, response)
-            elif choice == '13':
-                compare_all_models_auc()
-            elif choice == '0':
-                print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
-                break
-            else:
-                print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
-
-    def evaluate_model_performance(y_true, y_pred, y_prob, model_name, dataset_type):
-        print(Fore.CYAN + f"\nEvaluating {model_name} on {dataset_type} Data..." + Style.RESET_ALL)
-        cm = confusion_matrix(y_true, y_pred)
-        tn, fp, fn, tp = cm.ravel()
-
-        accuracy = accuracy_score(y_true, y_pred)
-        precision = precision_score(y_true, y_pred, zero_division=0)
-        recall = recall_score(y_true, y_pred, zero_division=0)
-        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-        f1 = f1_score(y_true, y_pred, zero_division=0)
-        fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-        auc_score = auc(fpr, tpr)
-
-        print(f"Accuracy: {accuracy:.2f}, Precision: {precision:.2f}, Recall (Sensitivity): {recall:.2f}")
-        print(f"Specificity: {specificity:.2f}, F1 Score: {f1:.2f}, AUC: {auc_score:.2f}")
-
-        plt.figure()
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['No', 'Yes'], yticklabels=['No', 'Yes'])
-        plt.title(f"Confusion Matrix ({model_name}, {dataset_type})")
-        plt.xlabel("Predicted")
-        plt.ylabel("Actual")
-        cm_dir = os.path.join(ASSETS_DIR, "confusion_matrices")
-        ensure_dir(cm_dir)
-        plt.savefig(os.path.join(cm_dir, f"confusion_matrix_{model_name}_{dataset_type.lower()}.png"))
-        plt.show()
-
-        plt.figure()
-        plt.plot(fpr, tpr, label=f"AUC = {auc_score:.2f}")
-        plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
-        plt.title(f"ROC Curve ({model_name}, {dataset_type})")
-        plt.xlabel("False Positive Rate")
-        plt.ylabel("True Positive Rate")
-        plt.legend(loc="lower right")
-        plt.grid(alpha=0.3)
-        roc_dir = os.path.join(ASSETS_DIR, "roc_curves")
-        ensure_dir(roc_dir)
-        plt.savefig(os.path.join(roc_dir, f"roc_curve_{model_name}_{dataset_type.lower()}.png"))
-        plt.show()
-
-        return {
-            "accuracy": accuracy,
-            "precision": precision,
-            "recall": recall,
-            "specificity": specificity,
-            "f1_score": f1,
-            "auc": auc_score,
-            "confusion_matrix": cm.tolist()
-        }
-
-    def evaluate_naive_bayes(config_key, data, response="response"):
-        print(Fore.CYAN + f"\nRunning Naïve Bayes for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
-        filtered_data = preprocess_for_configuration(data, config_key, response)
-
-        X_train, X_test, y_train, y_test = train_test_split(
-            filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
-        )
-
-        model = GaussianNB()
-        model.fit(X_train, y_train)
-
-        y_train_pred = model.predict(X_train)
-        y_train_prob = model.predict_proba(X_train)[:, 1]
-        train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Naive Bayes", "Train")
-
-        y_test_pred = model.predict(X_test)
-        y_test_prob = model.predict_proba(X_test)[:, 1]
-        test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Naive Bayes", "Test")
-
-        global_logs["models"][config_key]["naive_bayes_results"] = {
-            "train_metrics": train_metrics,
-            "test_metrics": test_metrics,
-        }
-
-    def evaluate_decision_tree(config_key, data, response="response"):
-        print(Fore.CYAN + f"\nRunning Decision Tree for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
-        filtered_data = preprocess_for_configuration(data, config_key, response)
-
-        X_train, X_test, y_train, y_test = train_test_split(
-            filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
-        )
-
-        model = DecisionTreeClassifier(random_state=42)
-        model.fit(X_train, y_train)
-
-        visualize_decision_tree(
-            model=model,
-            feature_names=X_train.columns,
-            class_names=["No", "Yes"],
-            config_key=config_key,
-            file_name="decision_tree_visualization"
-        )
-
-        y_train_pred = model.predict(X_train)
-        y_train_prob = model.predict_proba(X_train)[:, 1]
-        train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Decision Tree", "Train")
-
-        y_test_pred = model.predict(X_test)
-        y_test_prob = model.predict_proba(X_test)[:, 1]
-        test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Decision Tree", "Test")
-
-        if config_key not in global_logs["models"]:
-            global_logs["models"][config_key] = {}
-        global_logs["models"][config_key]["decision_tree_results"] = {
-            "train_metrics": train_metrics,
-            "test_metrics": test_metrics,
-        }
-
     def visualize_decision_tree(model, feature_names, class_names, config_key=None, file_name="tree_visualization"):
 
         if config_key:
@@ -805,44 +852,6 @@ def predict_customer_response(data, response='response'):
         output_path = os.path.join(dt_dir, file_name)
         graph.render(output_path, format="png", cleanup=True)
         print(f"Decision tree visualization saved as {file_name}.png")
-
-    def compare_all_models_auc():
-        print(Fore.CYAN + "\nComparing AUC for All Models..." + Style.RESET_ALL)
-        metrics = []
-        for config, models in global_logs["models"].items():
-            for model_name, results in models.items():
-                try:
-                    train_auc = results.get("train_metrics", {}).get("auc", None)
-                    test_auc = results.get("test_metrics", {}).get("auc", None)
-
-                    if train_auc is not None and test_auc is not None:
-                        metrics.append({
-                            "Configuration": config.capitalize(),
-                            "Model": model_name.replace("_", " ").capitalize(),
-                            "Train AUC": train_auc,
-                            "Test AUC": test_auc,
-                        })
-                    else:
-                        print(Fore.YELLOW + f"Skipping {model_name} for {config} due to missing AUC data." + Style.RESET_ALL)
-                except Exception as e:
-                    print(Fore.RED + f"Error processing {model_name} for {config}: {e}" + Style.RESET_ALL)
-
-        if not metrics:
-            print(Fore.RED + "No AUC data available for comparison." + Style.RESET_ALL)
-            return
-
-        df = pd.DataFrame(metrics)
-        plt.figure(figsize=(12, 6))
-        sns.barplot(data=df, x="Configuration", y="Test AUC", hue="Model", edgecolor="black")
-        plt.title("Test AUC Comparison Across Configurations and Models")
-        plt.ylabel("Test AUC")
-        plt.xlabel("Configuration")
-        plt.legend(title="Model")
-        plt.grid(axis="y", linestyle="--", alpha=0.7)
-        aggregated_dir = os.path.join(ASSETS_DIR, "aggregated_metrics")
-        ensure_dir(aggregated_dir)
-        plt.savefig(os.path.join(aggregated_dir, "test_auc_comparison.png"))
-        plt.show()
 
     def bin_numerical_variables(data, response="response"):
         print(Fore.CYAN + "\nBinning Numerical Variables..." + Style.RESET_ALL)
@@ -883,100 +892,4 @@ def predict_customer_response(data, response='response'):
 
         return binned_data
 
-    def evaluate_decision_tree_binned(config_key, data, response="response"):
-        print(Fore.CYAN + f"\nRunning Decision Tree with Binned Variables for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
-        filtered_data = preprocess_for_configuration(data, config_key, response)
-        filtered_data = bin_numerical_variables(filtered_data, response=response)
-
-        X_train, X_test, y_train, y_test = train_test_split(
-            filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
-        )
-
-        model = DecisionTreeClassifier(random_state=42)
-        model.fit(X_train, y_train)
-
-        visualize_decision_tree(
-            model=model,
-            feature_names=X_train.columns,
-            class_names=["No", "Yes"],
-            config_key=f"{config_key}_binned",
-            file_name="decision_tree_visualization_binned"
-        )
-
-        y_train_pred = model.predict(X_train)
-        y_train_prob = model.predict_proba(X_train)[:, 1]
-        train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "Decision Tree (Binned)", "Train")
-
-        y_test_pred = model.predict(X_test)
-        y_test_prob = model.predict_proba(X_test)[:, 1]
-        test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "Decision Tree (Binned)", "Test")
-
-        if config_key not in global_logs["models"]:
-            global_logs["models"][config_key] = {}
-        global_logs["models"][config_key]["decision_tree_binned_results"] = {
-            "train_metrics": train_metrics,
-            "test_metrics": test_metrics,
-        }
-
-    def run_svm_evaluation_submenu(processed_data, response="response"):
-        """
-        Submenu for evaluating SVM models across configurations.
-        """
-        while True:
-            print(Fore.CYAN + "\nEvaluate SVM Models:" + Style.RESET_ALL)
-            print("1. Run SVM (Baseline)")
-            print("2. Run SVM (Recoded)")
-            print("3. Run SVM (Outlier Removed)")
-            print("4. Run SVM (Outlier Recoded Scaled)")
-            print("5. Compare AUC for All Models")
-            print("0. Return to Main Menu")
-
-            choice = input(Fore.YELLOW + "Enter your choice: " + Style.RESET_ALL)
-
-            if choice == '1':
-                evaluate_svm("baseline", processed_data, response)
-            elif choice == '2':
-                evaluate_svm("recoded", processed_data, response)
-            elif choice == '3':
-                evaluate_svm("outlier_removed", processed_data, response)
-            elif choice == '4':
-                evaluate_svm("outlier_recoded_scaled", processed_data, response)
-            elif choice == '5':
-                compare_all_models_auc()
-            elif choice == '0':
-                print(Fore.CYAN + "Returning to Main Menu..." + Style.RESET_ALL)
-                break
-            else:
-                print(Fore.RED + "Invalid choice! Please try again." + Style.RESET_ALL)
-
-    def evaluate_svm(config_key, data, response="response"):
-        """
-        Evaluate SVM model for a given configuration.
-        """
-        print(Fore.CYAN + f"\nRunning SVM for {config_key.capitalize()} Configuration..." + Style.RESET_ALL)
-        filtered_data = preprocess_for_configuration(data, config_key, response)
-
-        X_train, X_test, y_train, y_test = train_test_split(
-            filtered_data.drop(columns=[response]), filtered_data[response], test_size=0.2, random_state=42
-        )
-
-        # Train SVM with probability estimates enabled
-        model = SVC(probability=True, kernel='rbf', C=1.0, gamma='scale', random_state=42)
-        model.fit(X_train, y_train)
-
-        y_train_pred = model.predict(X_train)
-        y_train_prob = model.predict_proba(X_train)[:, 1]
-        train_metrics = evaluate_model_performance(y_train, y_train_pred, y_train_prob, "SVM", "Train")
-
-        y_test_pred = model.predict(X_test)
-        y_test_prob = model.predict_proba(X_test)[:, 1]
-        test_metrics = evaluate_model_performance(y_test, y_test_pred, y_test_prob, "SVM", "Test")
-
-        if config_key not in global_logs["models"]:
-            global_logs["models"][config_key] = {}
-        global_logs["models"][config_key]["svm_results"] = {
-            "train_metrics": train_metrics,
-            "test_metrics": test_metrics,
-        }
-
-    submenu()
+    main_submenu()
