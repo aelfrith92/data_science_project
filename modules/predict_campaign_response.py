@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, auc
+from sklearn.metrics import confusion_matrix, roc_curve, auc
 from sklearn.tree import DecisionTreeClassifier, export_graphviz
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import SVC
@@ -18,6 +18,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from colorama import Fore, Style
 from modules.saving import ensure_dir, ASSETS_DIR
+import pprint
 
 global_logs = {
     "preprocessing": {},
@@ -28,6 +29,17 @@ global_logs = {
         "recoded": {},
         "outlier_removed": {},
         "outlier_recoded_scaled": {}
+    },
+    "metrics": {
+        "train_accuracy": {},
+        "test_accuracy": {},
+        "train_auc": {},
+        "test_auc": {},
+        "train_balanced_accuracy": {},
+        "test_balanced_accuracy": {},
+        "overfitting_accuracy_gap": {},
+        "overfitting_auc_gap": {},
+        "overfitting_balanced_accuracy_gap": {}
     }
 }
 
@@ -240,9 +252,9 @@ def predict_customer_response(data, response='response'):
             filtered_data = check_and_handle_multicollinearity(processed_data, response)
             significant_vars = explore_feature_significance(filtered_data, response)
 
-            # Bin variables after multicollinearity and significance checks
+            # Bin variables after multicollinearity and significance checks - for DT binned
             if model_type == "decision_tree_binned_after":
-                data = bin_numerical_variables(data, response)
+                filtered_data = bin_numerical_variables(filtered_data, response)
         
             if not significant_vars:
                 print(Fore.RED + "No significant variables found for baseline model." + Style.RESET_ALL)
@@ -482,8 +494,8 @@ def predict_customer_response(data, response='response'):
 
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=(1 - train_size), random_state=42)
         model.fit(X_train, y_train)
-        
-        # **Decision Tree Visualization**
+
+        # Decision Tree Visualization
         if isinstance(model, DecisionTreeClassifier):
             print(Fore.CYAN + "\nVisualizing Decision Tree..." + Style.RESET_ALL)
             visualize_decision_tree(
@@ -493,21 +505,29 @@ def predict_customer_response(data, response='response'):
                 config_key=configuration_key,
                 file_name=f"{clean_string_to_snake_case(model_name)}_{configuration_key}"
             )
-        
+
+        # Evaluate Train and Test Metrics
         train_metrics = evaluate_model(y_train, model.predict(X_train), model.predict_proba(X_train)[:, 1], model_name, dataset_type="Train")
         test_metrics = evaluate_model(y_test, model.predict(X_test), model.predict_proba(X_test)[:, 1], model_name, train_metrics=train_metrics, dataset_type="Test")
 
+        # Log results into global_logs
         if global_logs["models"][configuration_key] is None:
             global_logs["models"][configuration_key] = {}
 
         model_key = f"{model_name.lower().replace(' ', '_')}_results"
         global_logs["models"][configuration_key][model_key] = {
-            "train_accuracy": train_metrics.get("accuracy"),
-            "test_accuracy": test_metrics.get("accuracy"),
+            "train_accuracy": train_metrics.get("accuracy", 0),
+            "test_accuracy": test_metrics.get("accuracy", 0),
+            "train_auc": train_metrics.get("auc", 0),
+            "test_auc": test_metrics.get("auc", 0),
+            "overfitting_accuracy_gap": train_metrics.get("accuracy", 0) - test_metrics.get("accuracy", 0),
+            "overfitting_auc_gap": train_metrics.get("auc", 0) - test_metrics.get("auc", 0),
+            "train_balanced_accuracy": train_metrics.get("balanced_accuracy", 0),
+            "test_balanced_accuracy": test_metrics.get("balanced_accuracy", 0),
+            "overfitting_balanced_accuracy_gap": train_metrics.get("balanced_accuracy", 0) - test_metrics.get("balanced_accuracy", 0),
             "variables_used": significant_vars,
-            "overfitting_gap": train_metrics.get("accuracy") - test_metrics.get("accuracy"),
-            "balanced_accuracy_gap": train_metrics.get("balanced_accuracy") - test_metrics.get("balanced_accuracy"),
         }
+
         print(Fore.GREEN + f"\n{model_name} Model Results logged: {global_logs['models'][configuration_key][model_key]}" + Style.RESET_ALL)
 
     def evaluate_model(y_true, y_pred, y_prob, model_name, train_metrics=None, dataset_type="Test"):
@@ -515,25 +535,42 @@ def predict_customer_response(data, response='response'):
         cm = confusion_matrix(y_true, y_pred)
         tn, fp, fn, tp = cm.ravel()
 
+        # Compute key metrics
         accuracy = (tp + tn) / (tp + tn + fp + fn)
         sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
         balanced_accuracy = (sensitivity + specificity) / 2
 
+        # Compute ROC and AUC
         fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+        auc_score = auc(fpr, tpr)
+
+        # Identify optimal threshold for ROC Curve
         optimal_idx = np.argmax(tpr - fpr)
         best_threshold = thresholds[optimal_idx]
 
-        print(f"Accuracy: {accuracy:.2f}, Sensitivity: {sensitivity:.2f}, Specificity: {specificity:.2f}, Balanced Accuracy: {balanced_accuracy:.2f}")
-        print(f"Best Threshold: {best_threshold:.2f}")
+        print(f"Accuracy: {accuracy:.2f}, AUC: {auc_score:.2f}, Sensitivity: {sensitivity:.2f}, Specificity: {specificity:.2f}")
+        print(f"Balanced Accuracy: {balanced_accuracy:.2f}, Best Threshold: {best_threshold:.2f}")
 
+        # Compare Train and Test Metrics (if train_metrics is provided)
         if train_metrics is not None and dataset_type == "Test":
             print(Fore.YELLOW + "\nOverfitting Assessment:" + Style.RESET_ALL)
-            print(f"Train-Test Accuracy Gap: {train_metrics['accuracy'] - accuracy:.2f}")
-            print(f"Train-Test Balanced Accuracy Gap: {train_metrics['balanced_accuracy'] - balanced_accuracy:.2f}")
-            if abs(train_metrics['accuracy'] - accuracy) > 0.1:
-                print(Fore.RED + "Warning: Potential Overfitting Detected (Accuracy Gap > 0.1)." + Style.RESET_ALL)
+            accuracy_gap = train_metrics['accuracy'] - accuracy
+            auc_gap = train_metrics['auc'] - auc_score
+            balanced_accuracy_gap = train_metrics['balanced_accuracy'] - balanced_accuracy
 
+            print(f"Train-Test Accuracy Gap: {accuracy_gap:.2f}")
+            print(f"Train-Test AUC Gap: {auc_gap:.2f}")
+            print(f"Train-Test Balanced Accuracy Gap: {balanced_accuracy_gap:.2f}")
+
+            if abs(accuracy_gap) > 0.1:
+                print(Fore.RED + "Warning: Potential Overfitting Detected (Accuracy Gap > 0.1)." + Style.RESET_ALL)
+        else:
+            accuracy_gap = None
+            auc_gap = None
+            balanced_accuracy_gap = None
+
+        # Save Confusion Matrix Plot
         plt.figure()
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['No', 'Yes'], yticklabels=['No', 'Yes'])
         plt.title(f"Confusion Matrix ({model_name}, {dataset_type})")
@@ -544,8 +581,9 @@ def predict_customer_response(data, response='response'):
         plt.savefig(os.path.join(cm_dir, f"confusion_matrix_{clean_string_to_snake_case(model_name)}_{dataset_type.lower()}.png"))
         plt.show()
 
+        # Save ROC Curve Plot
         plt.figure()
-        plt.plot(fpr, tpr, label=f"AUC = {auc(fpr, tpr):.2f}")
+        plt.plot(fpr, tpr, label=f"AUC = {auc_score:.2f}")
         plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
         plt.title(f"ROC Curve ({model_name}, {dataset_type})")
         plt.xlabel("False Positive Rate")
@@ -557,12 +595,17 @@ def predict_customer_response(data, response='response'):
         plt.savefig(os.path.join(roc_dir, f"roc_curve_{clean_string_to_snake_case(model_name)}_{dataset_type.lower()}.png"))
         plt.show()
 
+        # Return metrics, including gaps (if train metrics provided)
         return {
             "accuracy": accuracy,
+            "auc": auc_score,
             "sensitivity": sensitivity,
             "specificity": specificity,
             "balanced_accuracy": balanced_accuracy,
             "best_threshold": best_threshold,
+            "accuracy_gap": accuracy_gap,
+            "auc_gap": auc_gap,
+            "balanced_accuracy_gap": balanced_accuracy_gap
         }
 
     def run_models_with_recoded_variables(data, response, model, model_name, train_size):
@@ -681,6 +724,8 @@ def predict_customer_response(data, response='response'):
 
     def summarize_results():
         print(Fore.CYAN + "\nSummary of All Model Runs:" + Style.RESET_ALL)
+
+        # Preprocessing Summary
         print(Fore.CYAN + "\nPreprocessing Summary:" + Style.RESET_ALL)
         preprocessing_steps = global_logs.get("preprocessing", {}).get("steps", [])
         if preprocessing_steps:
@@ -689,6 +734,7 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.YELLOW + "No preprocessing steps logged." + Style.RESET_ALL)
 
+        # Multicollinearity Checks
         print(Fore.CYAN + "\nMulticollinearity Checks:" + Style.RESET_ALL)
         vif_results = global_logs.get("multicollinearity", {}).get("vif")
         if vif_results:
@@ -698,79 +744,144 @@ def predict_customer_response(data, response='response'):
         else:
             print(Fore.YELLOW + "No multicollinearity results logged." + Style.RESET_ALL)
 
+        # Model Performance Comparison
         print(Fore.CYAN + "\nModel Performance Comparison:" + Style.RESET_ALL)
         model_results = global_logs.get("models", {})
         all_metrics = []
 
         for config, models in model_results.items():
+
             if models:
                 for model_name, metrics in models.items():
                     try:
-                        print(Fore.GREEN + f"\n{config.capitalize()} - {model_name.replace('_', ' ').capitalize()} Model Results:" + Style.RESET_ALL)
-                        print(f"Train Accuracy: {metrics['train_accuracy']:.2f}")
-                        print(f"Test Accuracy: {metrics['test_accuracy']:.2f}")
-                        print(f"Overfitting Gap: {metrics['overfitting_gap']:.2f}")
-                        print(f"Balanced Accuracy Gap: {metrics['balanced_accuracy_gap']:.2f}")
-                        print(f"Variables Used: {', '.join(metrics['variables_used'])}")
+                        # Safely extract metrics or replace with placeholders
+                        train_accuracy = metrics.get("train_accuracy", 0)
+                        test_accuracy = metrics.get("test_accuracy", 0)
+                        train_auc = metrics.get("train_auc", 0)
+                        test_auc = metrics.get("test_auc", 0)
+                        train_bal_acc = metrics.get("train_balanced_accuracy", 0)
+                        test_bal_acc = metrics.get("test_balanced_accuracy", 0)
+                        overfitting_accuracy_gap = metrics.get("overfitting_accuracy_gap", 0)
+                        overfitting_auc_gap = metrics.get("overfitting_auc_gap", 0)
+                        overfitting_bal_acc_gap = metrics.get("overfitting_balanced_accuracy_gap", 0)
+                        variables_used = metrics.get("variables_used", [])
 
+                        # Print model summary
+                        print(Fore.GREEN + f"\n{config.capitalize()} - {model_name.replace('_', ' ').capitalize()} Model Results:" + Style.RESET_ALL)
+                        print(f"Train Accuracy: {train_accuracy:.2f}")
+                        print(f"Test Accuracy: {test_accuracy:.2f}")
+                        print(f"Train AUC: {train_auc:.2f}")
+                        print(f"Test AUC: {test_auc:.2f}")
+                        print(f"Train Balanced Accuracy: {train_bal_acc:.2f}")
+                        print(f"Test Balanced Accuracy: {test_bal_acc:.2f}")
+                        print(f"Overfitting Accuracy Gap: {overfitting_accuracy_gap:.2f}")
+                        print(f"Overfitting AUC Gap: {overfitting_auc_gap:.2f}")
+                        print(f"Overfitting Balanced Accuracy Gap: {overfitting_bal_acc_gap:.2f}")
+                        print(f"Variables Used: {', '.join(variables_used)}")
+
+                        # Append to all_metrics for visualization
                         all_metrics.append({
                             "Configuration": config.capitalize(),
                             "Model": model_name.replace('_', ' ').capitalize(),
-                            "Train Accuracy": metrics['train_accuracy'],
-                            "Test Accuracy": metrics['test_accuracy'],
-                            "Overfitting Gap": metrics['overfitting_gap'],
-                            "Balanced Accuracy Gap": metrics['balanced_accuracy_gap']
+                            "Train Accuracy": train_accuracy,
+                            "Test Accuracy": test_accuracy,
+                            "Train AUC": train_auc,
+                            "Test AUC": test_auc,
+                            "Train Balanced Accuracy": train_bal_acc,
+                            "Test Balanced Accuracy": test_bal_acc,
+                            "Overfitting Accuracy Gap": overfitting_accuracy_gap,
+                            "Overfitting AUC Gap": overfitting_auc_gap,
+                            "Overfitting Balanced Accuracy Gap": overfitting_bal_acc_gap,
                         })
-                    except KeyError as e:
-                        print(Fore.RED + f"Missing key in results: {e}" + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"Error processing metrics for {model_name} in {config}: {e}" + Style.RESET_ALL)
             else:
                 print(Fore.YELLOW + f"No results logged for {config} configuration." + Style.RESET_ALL)
 
+        # Debug: Print final metrics before visualization
+        print(Fore.CYAN + "\nFinal global_logs Structure Before Visualization:" + Style.RESET_ALL)
+        pprint.pprint(global_logs)
+
+        print(Fore.CYAN + "\nFinal Metrics for Visualization:" + Style.RESET_ALL)
         if all_metrics:
-            generate_aggregated_performance_chart(all_metrics)
+            df_all_metrics = pd.DataFrame(all_metrics)
+            print(df_all_metrics)
+            generate_detailed_performance_charts(df_all_metrics)
         else:
             print(Fore.RED + "No performance metrics available for visualization." + Style.RESET_ALL)
 
-    def generate_aggregated_performance_chart(metrics):
-        df = pd.DataFrame(metrics)
+    def generate_detailed_performance_charts(metrics_df):
+        """
+        Generate separate bar charts for Train AUC, Test AUC, Test Accuracy, and Overfitting Gaps.
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
 
-        plt.figure(figsize=(12, 6))
-        sns.barplot(
-            data=df,
-            x="Configuration",
-            y="Test Accuracy",
-            hue="Model",
-            edgecolor="black",
-        )
-        plt.title("Test Accuracy Comparison Across Configurations and Models")
-        plt.ylabel("Test Accuracy")
-        plt.xlabel("Configuration")
-        plt.legend(title="Model")
-        plt.grid(axis="y", linestyle="--", alpha=0.7)
-        aggregated_dir = os.path.join(ASSETS_DIR, "aggregated_metrics")
-        ensure_dir(aggregated_dir)
-        plt.savefig(os.path.join(aggregated_dir, "test_accuracy_comparison.png"))
-        plt.show()
+        # Correct column names for clarity
+        metrics_df = metrics_df.rename(columns={
+            "Overfitting Accuracy Gap": "Overfitting_Accuracy_Gap",
+            "Train AUC": "Train_AUC",
+            "Test AUC": "Test_AUC"
+        })
 
-        plt.figure(figsize=(12, 6))
-        sns.barplot(
-            data=df,
-            x="Configuration",
-            y="Overfitting Gap",
-            hue="Model",
-            palette="coolwarm",
-            edgecolor="black",
-        )
-        plt.axhline(0, color="black", linestyle="--", linewidth=1)
-        plt.title("Overfitting Gap Across Configurations and Models")
-        plt.ylabel("Overfitting Gap (Train - Test Accuracy)")
-        plt.xlabel("Configuration")
-        plt.legend(title="Model")
-        plt.grid(axis="y", linestyle="--", alpha=0.7)
-        aggregated_dir = os.path.join(ASSETS_DIR, "aggregated_metrics")
-        ensure_dir(aggregated_dir)
-        plt.savefig(os.path.join(aggregated_dir, "overfitting_gap_comparison.png"))
-        plt.show()
+        # Extract unique configurations and models
+        configurations = metrics_df['Configuration'].unique()
+        models = metrics_df['Model'].unique()
+        bar_width = 0.2  # Space bars properly to avoid overlap
+        spacing = 0.3    # Space between configuration groups
+
+        # Define consistent colors for models using matplotlib's tableau colors
+        tableau_colors = list(mcolors.TABLEAU_COLORS.values())
+        model_colors = {model: tableau_colors[i % len(tableau_colors)] for i, model in enumerate(models)}
+
+        # Define metrics to plot
+        metrics_to_plot = [
+            ("Train_AUC", "Train AUC"),
+            ("Test_AUC", "Test AUC"),
+            ("Test Accuracy", "Test Accuracy"),
+            ("Overfitting_Accuracy_Gap", "Overfitting Accuracy Gap")
+        ]
+
+        # ==========================
+        # Loop Through Each Metric
+        # ==========================
+        for metric_column, metric_label in metrics_to_plot:
+            plt.figure(figsize=(14, 8))
+            x_positions = [i * (len(models) * bar_width + spacing) for i in range(len(configurations))]
+
+            # Plot bars for each model
+            for idx, model in enumerate(models):
+                metric_values = []
+
+                for config in configurations:
+                    subset = metrics_df[(metrics_df['Configuration'] == config) & (metrics_df['Model'] == model)]
+                    if not subset.empty:
+                        metric_values.append(subset[metric_column].values[0])
+                    else:
+                        metric_values.append(0)
+
+                plt.bar(
+                    [x + idx * bar_width for x in x_positions],
+                    metric_values,
+                    width=bar_width,
+                    color=model_colors[model],
+                    label=model
+                )
+
+            # Final adjustments for the chart
+            plt.xticks([x + (len(models) * bar_width) / 2 for x in x_positions], configurations, rotation=45)
+            plt.title(f"{metric_label} by Model and Configuration")
+            plt.xlabel("Configuration")
+            plt.ylabel(metric_label)
+            plt.legend(title="Model", loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
+            plt.tight_layout()
+            plt.grid(alpha=0.3)
+
+            # Save the chart
+            chart_dir = os.path.join(ASSETS_DIR, metric_label.replace(" ", "_").lower())
+            ensure_dir(chart_dir)
+            plt.savefig(os.path.join(chart_dir, f"{metric_label.replace(' ', '_').lower()}_comparison.png"))
+            plt.show()
 
     def preprocess_for_configuration(data, config_key, response="response"):
         processed_data = preprocess_data_for_model(data)
@@ -854,6 +965,10 @@ def predict_customer_response(data, response='response'):
         print(f"Decision tree visualization saved as {file_name}.png")
 
     def bin_numerical_variables(data, response="response"):
+        if data is None or response not in data.columns:
+            print("Error: Invalid input data or response column missing.")
+            return data
+        
         print(Fore.CYAN + "\nBinning Numerical Variables..." + Style.RESET_ALL)
         binned_data = data.copy()
         numerical_cols = binned_data.select_dtypes(include=['float64', 'int64']).columns
